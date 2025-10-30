@@ -73,7 +73,7 @@ def main():
     # Load pre-trained weights for STDiT3
     # Assuming the checkpoint is in the same structure as inference.py expects
     # This path needs to be relative to the Colab environment where the checkpoint is copied
-    ckpt_path = "/content/local_checkpoints/ckpt/ema.pt" # Path to pre-trained weights in local Colab storage
+    ckpt_path = "/content/1380-solution_github/checkpoints/ckpt/ema.pt" # Path to pre-trained weights in local Colab storage
     state_dict = torch.load(ckpt_path, weights_only=True)
     model.load_state_dict(state_dict, strict=True)
 
