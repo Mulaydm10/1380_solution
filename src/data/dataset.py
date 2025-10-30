@@ -61,7 +61,7 @@ class SensorGenDataset(Dataset):
         result["height"] = result["cond_cam"].shape[3]
         result["width"] = result["cond_cam"].shape[4]
 
-        result["ride_id"] = scene.ride_id
+        result["ride_id"] = str(scene.ride_id)
         result["camera_names"] = scene.camera_names
 
         return result
