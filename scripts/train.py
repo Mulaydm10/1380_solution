@@ -125,7 +125,7 @@ def main():
                     # For now, we'll use a dummy tensor or adapt to existing output
                     # If dataset doesn't return GT, this will crash. We'll fix in Day 2.
                     dummy_gt_images = torch.randn(1, 3, 1, 256, 256).to(accelerator.device) # Placeholder (Batch, Channels, Frames, Height, Width)
-                    latents = vae.encode(dummy_gt_images).latents # Placeholder
+                    latents = vae.encode(dummy_gt_images) # Placeholder
                 vae.to("cpu")
 
                 # Predict noise (simplified for now, will use scheduler in Day 2/3)
