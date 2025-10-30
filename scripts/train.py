@@ -124,7 +124,7 @@ def main():
                     # This needs to be implemented in src/data/dataset.py
                     # For now, we'll use a dummy tensor or adapt to existing output
                     # If dataset doesn't return GT, this will crash. We'll fix in Day 2.
-                    dummy_gt_images = torch.randn(1, 3, 256, 256).to(accelerator.device) # Placeholder
+                    dummy_gt_images = torch.randn(1, 3, 1, 256, 256).to(accelerator.device) # Placeholder (Batch, Channels, Frames, Height, Width)
                     latents = vae.encode(dummy_gt_images).latents # Placeholder
                 vae.to("cpu")
 
