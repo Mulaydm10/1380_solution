@@ -1,4 +1,3 @@
-
 import os
 import gc
 import torch
@@ -149,7 +148,7 @@ def main():
                                         NC=dummy_NC)
 
                 # Calculate loss (MSE for now)
-                loss = F.mse_mse_loss(predicted_noise, noise, reduction="mean")
+                loss = F.mse_loss(predicted_noise, noise, reduction="mean")
                 
                 accelerator.backward(loss)
 
