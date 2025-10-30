@@ -1,0 +1,7 @@
+# checkpoints/ filter=lfs diff=lfs merge=lfs -text
+# checkpoints/CogVideoX-2b filter=lfs diff=lfs merge=lfs -text
+# checkpoints/ckpt filter=lfs diff=lfs merge=lfs -text
+# checkpoints/CogVideoX-2b/vae/config.json filter=lfs diff=lfs merge=lfs -text
+# checkpoints/ckpt/ema.pt filter=lfs diff=lfs merge=lfs -text
+# checkpoints/CogVideoX-2b/vae filter=lfs diff=lfs merge=lfs -text
+# checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors filter=lfs diff=lfs merge=lfs -text
