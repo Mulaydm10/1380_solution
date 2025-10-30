@@ -31,8 +31,7 @@ model = dict(
 
 vae = dict(
     type="VideoAutoencoderKLCogVideoX",
-    from_pretrained="./checkpoints/CogVideoX-2b",
-    subfolder="vae",
+    from_pretrained="./checkpoints/CogVideoX-2b/vae",
     micro_frame_size=micro_frame_size,
     micro_batch_size=1,
     local_files_only=True
