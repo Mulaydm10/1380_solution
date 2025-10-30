@@ -19,7 +19,7 @@ import pathlib
 from src.data.dataset import SensorGenDataset # Using existing dataset
 from src.data.collate import Collate
 from src.models.stdit.stdit3 import STDiT3
-from src.models.cog_vae.vae_cogvideox import VAE
+from src.models.cog_vae.vae_cogvideox import VideoAutoencoderKLCogVideoX
 from src.registry import MODELS, SCHEDULERS, build_module
 from config import model as model_config_dict, vae as vae_config_dict, scheduler as scheduler_config_dict # Import configs
 
