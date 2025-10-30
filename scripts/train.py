@@ -1,4 +1,8 @@
 import os
+import sys
+# Add project root to sys.path to enable imports from src
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import gc
 import torch
 import torch.nn.functional as F
