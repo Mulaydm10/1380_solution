@@ -14,6 +14,7 @@ from accelerate.utils import set_seed
 from transformers import get_cosine_schedule_with_warmup
 from tqdm import tqdm
 import pathlib
+from einops import repeat
 
 # Project imports (assuming they are in PYTHONPATH)
 from src.data.dataset import SensorGenDataset # Using existing dataset
@@ -129,23 +130,6 @@ def main():
                 # === 2. Dummy conditioning videos (4 side cameras) ===
                 dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # (1, 4, 3, 1, 256, 256)
 
-            with accelerator.accumulate(model):
-                # OOM Guard: Clear cache before forward pass
-                torch.cuda.empty_cache()
-                gc.collect()
-
-                # === DUMMY DATA (Replace with real batch later) ===
-                B, T, C, H, W = 1, 1, 3, 256, 256
-                NC = 5  # Total cameras: 1 front (GT) + 4 side
-                N_COND = NC - 1  # = 4 → conditioning cameras
-                device = accelerator.device
-
-                # === 1. Dummy GT video (front camera) ===
-                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
-
-                # === 2. Dummy conditioning videos (4 side cameras) ===
-                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # (1, 4, 3, 1, 256, 256)
-
                 # === 3. Encode clean latents ===
                 vae.to(device)
                 with torch.no_grad():
@@ -172,15 +156,26 @@ def main():
                 x = clean_cond_latents
                 cond_cam = noisy_target
 
-                # === 6. Dummy conditioning ===
-                dummy_bbox = {
+                # === 6. Dummy conditioning (expanded for internal batch) ===
+                # Base dummies (per original B=1)
+                base_bbox = {
                     "bboxes": torch.randn(B, 1, 10, 8, 3, device=device),
                     "classes": torch.randint(0, 8, (B, 1, 10), device=device),
                     "masks": torch.ones(B, 1, 10, device=device)
                 }
-                dummy_cams = torch.randn(B, 1, 7, 3, 7, device=device)
+                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)
                 dummy_height = torch.tensor([H], device=device)
                 dummy_width = torch.tensor([W], device=device)
+
+                # Expand to match internal batch (B * NC = 5)
+                expanded_bbox = {
+                    k: repeat(v, "b ... -> (b nc) ...", nc=NC) for k, v in base_bbox.items()
+                }
+                expanded_cams = repeat(base_cams, "b ... -> (b nc) ...", nc=NC)
+
+                # Debug: Verify shapes
+                print(f"expanded_bbox['masks'].shape: {expanded_bbox['masks'].shape}")  # [5, 1, 10]
+                print(f"expanded_cams.shape: {expanded_cams.shape}")  # [5, 7, 3, 7]
 
                 # === 7. Forward ===
                 print(f"x.shape: {x.shape}")  # [1, 64, 1, 32, 32]
@@ -188,8 +183,8 @@ def main():
                 predicted_noise = model(
                     x, timesteps,
                     cond_cam=cond_cam,
-                    bbox=dummy_bbox,
-                    cams=dummy_cams,
+                    bbox=expanded_bbox,  # Now [5, ...] shapes
+                    cams=expanded_cams,
                     height=dummy_height,
                     width=dummy_width,
                     NC=NC  # 5
@@ -197,18 +192,12 @@ def main():
                 print(f"predicted_noise.shape: {predicted_noise.shape}")  # [1, 80, 1, 32, 32]
 
                 # === 8. Loss on target slice only ===
-                target_start = 3 * C_latent  # 48
+                target_start = 3 * C_latent  # 48 (after 3 clean cams)
                 target_end = 4 * C_latent    # 64
                 target_pred = predicted_noise[:, target_start:target_end, :, :, :]
                 loss = F.mse_loss(target_pred, noise, reduction="mean")
+                print(f"Loss: {loss.item():.4f}")  # Debug: Expect ~1.0 for random
 
-                accelerator.backward(loss)
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.parameters(), training_config.max_grad_norm)
-
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
 
             # Logging and saving
             if accelerator.sync_gradients:
