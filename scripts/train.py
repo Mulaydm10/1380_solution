@@ -77,6 +77,7 @@ from config import model as model_config_dict  # Import configs
 from config import scheduler as scheduler_config_dict
 from config import vae as vae_config_dict
 from src.data.collate import Collate
+
 # Project imports (assuming they are in PYTHONPATH)
 from src.data.dataset import SensorGenDataset  # Using existing dataset
 from src.models.cog_vae.vae_cogvideox import VideoAutoencoderKLCogVideoX
@@ -145,8 +146,8 @@ def main():
     state_dict = torch.load(ckpt_path, weights_only=True)
     model.load_state_dict(state_dict, strict=True)
 
-    # Enable gradient checkpointing to save memory
-    model.gradient_checkpointing_enable()
+    # Gradient checkpointing not supported for STDiT3, skip to avoid error
+    # model.gradient_checkpointing_enable()
 
     # Freeze VAE and move to CPU to save VRAM
     vae.eval()
@@ -197,8 +198,14 @@ def main():
                 gc.collect()
                 torch.cuda.synchronize()
 
-                # === DUMMY DATA (T=4 to reduce memory, H=W=64 for smaller latents) ===
-                B, T, C, H, W = 1, 8, 3, 64, 64  # Reduced sizes
+                # === DUMMY DATA (T=4 to reduce memory further, H=W=32 for even smaller latents) ===
+                B, T, C, H, W = (
+                    1,
+                    4,
+                    3,
+                    32,
+                    32,
+                )  # Further reduced sizes to help with OOM
                 NC = 5
                 N_COND = NC - 1
                 device = accelerator.device
@@ -211,12 +218,12 @@ def main():
                 vae.to(device)
                 with torch.inference_mode():
                     clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
-                    # Repeat time to 2 if <2, pad spatial to 16x16 (reduced from 32)
+                    # Repeat time to 2 if <2, pad spatial to 8x8 (reduced from 16)
                     if clean_gt_latent.shape[2] < 2:
                         clean_gt_latent = clean_gt_latent.repeat(1, 1, 2, 1, 1)
-                    if clean_gt_latent.shape[3] < 16:
-                        pad_h = 16 - clean_gt_latent.shape[3]
-                        pad_w = 16 - clean_gt_latent.shape[4]
+                    if clean_gt_latent.shape[3] < 8:
+                        pad_h = 8 - clean_gt_latent.shape[3]
+                        pad_w = 8 - clean_gt_latent.shape[4]
                         clean_gt_latent = F.pad(
                             clean_gt_latent,
                             (0, pad_w, 0, pad_h, 0, 0),
@@ -236,9 +243,9 @@ def main():
                         # Repeat time to 2, pad spatial
                         if cond_tile.shape[2] < 2:
                             cond_tile = cond_tile.repeat(1, 1, 2, 1, 1)
-                        if cond_tile.shape[3] < 16:
-                            pad_h = 16 - cond_tile.shape[3]
-                            pad_w = 16 - cond_tile.shape[4]
+                        if cond_tile.shape[3] < 8:
+                            pad_h = 8 - cond_tile.shape[3]
+                            pad_w = 8 - cond_tile.shape[4]
                             cond_tile = F.pad(
                                 cond_tile,
                                 (0, pad_w, 0, pad_h, 0, 0),
