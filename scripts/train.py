@@ -325,189 +325,283 @@ def main():
 
 
 
-                # === DUMMY DATA (T=1 to avoid assertion) ===
+                                # === DUMMY DATA (Corrected according to Grok's analysis) ===
 
-                B, T, C, H, W = 1, 8, 3, 128, 128
 
-                NC = 5
 
-                N_COND = NC - 1
+                                B, T, C, H, W = 1, 8, 3, 128, 128
 
-                device = accelerator.device
 
-                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
 
-                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
+                                NC = 5  # Total cameras: 1 front (GT) + 4 side
 
 
 
-                # === 3. Encode clean latents (Tiled) ===
+                                N_COND = NC - 1  # = 4 -> conditioning cameras
 
-                torch.cuda.empty_cache()
 
-                gc.collect()
 
-                vae.to(device)
+                                device = accelerator.device
 
-                with torch.no_grad():
 
-                    clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
 
-                    # Repeat time to 2 if <2, pad spatial to 32x32
+                
 
-                    if clean_gt_latent.shape[2] < 2:
 
-                        clean_gt_latent = clean_gt_latent.repeat(1, 1, 2, 1, 1)
 
-                    if clean_gt_latent.shape[3] < 32:
+                                # === 1. Dummy GT video (front camera) ===
 
-                        pad_h = 32 - clean_gt_latent.shape[3]
 
-                        pad_w = 32 - clean_gt_latent.shape[4]
 
-                        clean_gt_latent = F.pad(clean_gt_latent, (0, pad_w, 0, pad_h, 0, 0), mode='constant', value=0)
+                                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
 
-                    B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
 
 
+                
 
-                    cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
 
-                    cond_latents_tiled = []
 
-                    for i in range(B * N_COND):
+                                # === 2. Dummy conditioning videos (4 side cameras) ===
 
-                        cond_tile = tile_vae_encode(vae, cond_reshaped[i:i+1])
 
-                        # Repeat time to 2, pad spatial
 
-                        if cond_tile.shape[2] < 2:
+                                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
 
-                            cond_tile = cond_tile.repeat(1, 1, 2, 1, 1)
 
-                        if cond_tile.shape[3] < 32:
 
-                            pad_h = 32 - cond_tile.shape[3]
+                
 
-                            pad_w = 32 - cond_tile.shape[4]
 
-                            cond_tile = F.pad(cond_tile, (0, pad_w, 0, pad_h, 0, 0), mode='constant', value=0)
 
-                        cond_latents_tiled.append(cond_tile)
+                                # === 3. Encode clean latents (Tiled) ===
 
-                        torch.cuda.empty_cache()
 
-                        gc.collect()
 
-                    cond_latents_raw = torch.cat(cond_latents_tiled, dim=0)
+                                torch.cuda.empty_cache()
 
-                    del cond_latents_tiled
 
-                    cond_latents_raw = cond_latents_raw.view(B, N_COND, C_latent, latent_T, latent_H, latent_W)
 
-                    clean_cond_latents = cond_latents_raw.view(B, N_COND * C_latent, latent_T, latent_H, latent_W)
+                                gc.collect()
 
-                    del cond_latents_raw
 
 
+                                vae.to(device)
 
-                vae.to("cpu")
 
-                torch.cuda.empty_cache()
 
-                gc.collect()
+                                with torch.no_grad():
 
-                torch.cuda.synchronize()
 
 
+                                    clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
 
-                # === 4. Add noise ===
 
-                noise = torch.randn_like(clean_gt_latent)
 
-                noisy_target = clean_gt_latent + noise
+                                    B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
 
-                timesteps = torch.randint(0, 1000, (B,), device=device).long()
 
 
+                
 
-                x = clean_cond_latents
 
-                cond_cam = noisy_target
 
+                                    # Tile cond cams
 
 
-                # === 6. Dummy conditioning (Minimal) ===
 
-                num_objects = 1
+                                    cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
 
-                base_bbox = {
 
-                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device),
 
-                    "classes": torch.randint(0, 8, (B, 1, num_objects), device=device),
+                                    cond_latents_tiled = []
 
-                    "masks": torch.ones(B, 1, num_objects, device=device)
 
-                }
 
-                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)
+                                    for i in range(B * N_COND):
 
-                dummy_height = torch.tensor([H], device=device)
 
-                dummy_width = torch.tensor([W], device=device)
 
+                                        cond_tile = tile_vae_encode(vae, cond_reshaped[i:i+1])
 
 
-                expanded_bbox = {k: repeat(v, "b ... -> (b nc) ...", nc=NC) for k, v in base_bbox.items()}
 
-                expanded_cams = repeat(base_cams, "b ... -> (b nc) ...", nc=NC)
+                                        cond_latents_tiled.append(cond_tile)
 
 
 
-                # Pre-forward clear
+                                        torch.cuda.empty_cache()
 
-                torch.cuda.empty_cache()
 
-                gc.collect()
 
-                torch.cuda.synchronize()
+                                        gc.collect()
 
 
 
-                # === 7. Forward ===
+                                    cond_latents_raw = torch.cat(cond_latents_tiled, dim=0)
 
-                predicted_noise = model(
 
-                    x, timesteps,
 
-                    cond_cam=cond_cam,
+                                    del cond_latents_tiled
 
-                    bbox=expanded_bbox,
 
-                    cams=expanded_cams,
 
-                    height=dummy_height,
+                                    cond_latents_raw = cond_latents_raw.view(B, N_COND, C_latent, latent_T, latent_H, latent_W)
 
-                    width=dummy_width,
 
-                    NC=NC
 
-                )
+                                    clean_cond_latents = cond_latents_raw.view(B, N_COND * C_latent, latent_T, latent_H, latent_W)
 
 
 
-                # === 8. Loss ===
+                                    del cond_latents_raw
 
-                target_start = 3 * C_latent
 
-                target_end = 4 * C_latent
 
-                target_pred = predicted_noise[:, target_start:target_end, :, :, :]
+                
 
-                loss = F.mse_loss(target_pred, noise, reduction="mean")
 
-                print(f"Loss: {loss.item():.4f}")
+
+                                vae.to("cpu")
+
+
+
+                                torch.cuda.empty_cache()
+
+
+
+                                gc.collect()
+
+
+
+                                torch.cuda.synchronize()
+
+
+
+                
+
+
+
+                                # === 4. Add noise ===
+
+
+
+                                noise = torch.randn_like(clean_gt_latent)
+
+
+
+                                noisy_latents = clean_gt_latent + noise # This is the noisy GT, which is the target for the model to denoise
+
+
+
+                                timesteps = torch.randint(0, 1000, (B,), device=device).long()
+
+
+
+                
+
+
+
+                                # === 5. Dummy conditioning ===
+
+
+
+                                num_objects = 1
+
+
+
+                                dummy_bbox = {
+
+
+
+                                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device),
+
+
+
+                                    "classes": torch.randint(0, 8, (B, 1, num_objects), device=device),
+
+
+
+                                    "masks": torch.ones(B, 1, num_objects, device=device)
+
+
+
+                                }
+
+
+
+                                dummy_cams = torch.randn(B, 1, 7, 3, 7, device=device)
+
+
+
+                                dummy_height = torch.tensor([H], device=device)
+
+
+
+                                dummy_width = torch.tensor([W], device=device)
+
+
+
+                
+
+
+
+                                # === 6. Forward ===
+
+
+
+                                predicted_noise = model(
+
+
+
+                                    noisy_latents,           # This is the tensor to be denoised
+
+
+
+                                    timesteps,
+
+
+
+                                    cond_cam=clean_cond_latents,  # This is the conditioning from other cameras
+
+
+
+                                    bbox=dummy_bbox,
+
+
+
+                                    cams=dummy_cams,
+
+
+
+                                    height=dummy_height,
+
+
+
+                                    width=dummy_width,
+
+
+
+                                    NC=NC  # Pass NC=5
+
+
+
+                                )
+
+
+
+                
+
+
+
+                                # === 7. Loss ===
+
+
+
+                                loss = F.mse_loss(predicted_noise, noise, reduction="mean")
+
+
+
+                                print(f"Loss: {loss.item():.4f}")
 
 
 
