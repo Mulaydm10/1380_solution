@@ -137,7 +137,7 @@ def main():
                 # Placeholder: model_args needs to be adapted from inference_utils.py
                 # For now, we'll pass minimal args
                 # This will likely need adjustment once dataset returns proper conditioning
-                dummy_cond_cam = torch.randn(1, 1, 3, 256, 256).to(accelerator.device)
+                dummy_cond_cam = torch.randn(1, 4, 3, 256, 256).to(accelerator.device)
                 dummy_bbox = {"bboxes": torch.randn(1, 1, 10, 8, 3).to(accelerator.device), "classes": torch.randint(0, 8, (1, 1, 10)).to(accelerator.device), "masks": torch.ones(1, 1, 10).to(accelerator.device)}
                 dummy_cams = torch.randn(1, 1, 7, 3, 7).to(accelerator.device)
                 dummy_height = torch.tensor([256]).to(accelerator.device)
