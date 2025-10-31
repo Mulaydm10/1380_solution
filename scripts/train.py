@@ -129,34 +129,51 @@ def main():
                 # === 2. Dummy conditioning videos (4 side cameras) ===
                 dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # (1, 4, 3, 1, 256, 256)
 
-                    # === 3. Encode GT and conditioning cameras ===
-                    vae.to(device)
+            with accelerator.accumulate(model):
+                # OOM Guard: Clear cache before forward pass
+                torch.cuda.empty_cache()
+                gc.collect()
 
-                    # GT: (B, C, T, H, W) → (B, 4, T', H', W')
+                # === DUMMY DATA (Replace with real batch later) ===
+                B, T, C, H, W = 1, 1, 3, 256, 256
+                NC = 5  # Total cameras: 1 front (GT) + 4 side
+                N_COND = NC - 1  # = 4 → conditioning cameras
+                device = accelerator.device
+
+                # === 1. Dummy GT video (front camera) ===
+                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
+
+                # === 2. Dummy conditioning videos (4 side cameras) ===
+                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # (1, 4, 3, 1, 256, 256)
+
+                # === 3. Move VAE to GPU and encode ===
+                vae.to(device)
+                with torch.no_grad():
+                    # Encode GT: (B, C, T, H, W) → (B, 4, T', H', W') e.g., (1, 4, 1, 64, 64)
                     latents_gt = vae.encode(dummy_gt_video)
-                    B_gt, C_gt, latent_T, latent_H, latent_W = latents_gt.shape
+                    B_gt, C_gt, latent_T, latent_H, latent_W = latents_gt.shape  # Unpack all dims
 
-                    # Conditioning: (B, N_COND, C, T, H, W) → (B*N_COND, C, T, H, W)
+                    # Encode conditioning: (B*N_COND, C, T, H, W) → (B*N_COND, 4, T', H', W') e.g., (4, 4, 1, 64, 64)
                     cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
-                    cond_latents = vae.encode(cond_reshaped)  # (B*N_COND, 4, T', H', W')
+                    cond_latents = vae.encode(cond_reshaped)
 
-                    # Infer from cond_latents
-                    _, C_cond, T_cond, H_cond, W_cond = cond_latents.shape
-                    assert T_cond == latent_T and H_cond == latent_H and W_cond == latent_W, "Latent sizes must match"
+                    # Verify dims match GT
+                    B_cond, C_cond, T_cond, H_cond, W_cond = cond_latents.shape
+                    assert C_cond == C_gt and T_cond == latent_T and H_cond == latent_H and W_cond == latent_W, f"Latent dims mismatch: GT {latents_gt.shape} vs Cond {cond_latents.shape}"
 
-                    # Reshape: (B, N_COND, 4, T', H', W')
+                    # Reshape cond: (B*N_COND, 4, T', H', W') → (B, N_COND, 4, T', H', W') e.g., (1, 4, 4, 1, 64, 64)
                     cond_latents = cond_latents.view(B, N_COND, C_cond, latent_T, latent_H, latent_W)
 
-                    # Collapse: (B, N_COND*4, T', H', W') → (1, 16, 1, 32, 32)
+                    # Collapse channels: (B, N_COND*4, T', H', W') e.g., (1, 16, 1, 64, 64)
                     cond_cam_latents = cond_latents.view(B, N_COND * C_cond, latent_T, latent_H, latent_W)
 
-                    vae.to("cpu")
-                    torch.cuda.empty_cache()
+                vae.to("cpu")
+                torch.cuda.empty_cache()
 
-                    # === 4. Add noise ===
-                    noise = torch.randn_like(latents_gt)
-                    timesteps = torch.randint(0, 1000, (B_gt,), device=device).long()
-                    noisy_latents = latents_gt + noise
+                # === 4. Add noise ===
+                noise = torch.randn_like(latents_gt)
+                timesteps = torch.randint(0, 1000, (B_gt,), device=device).long()
+                noisy_latents = latents_gt + noise
 
                 # === 5. Dummy conditioning ===
                 dummy_bbox = {
@@ -169,10 +186,12 @@ def main():
                 dummy_width = torch.tensor([W], device=device)
 
                 # === 6. Forward ===
+                print(f"noisy_latents.shape: {noisy_latents.shape}")  # Debug: (1, 4, 1, 64, 64)
+                print(f"cond_cam_latents.shape: {cond_cam_latents.shape}")  # Debug: (1, 16, 1, 64, 64)
                 predicted_noise = model(
-                    noisy_latents,           # (1, 4, 1, 32, 32)
+                    noisy_latents,  # (1, 4, 1, 64, 64)
                     timesteps,
-                    cond_cam=cond_cam_latents,  # (1, 16, 1, 32, 32)
+                    cond_cam=cond_cam_latents,  # (1, 16, 1, 64, 64)
                     bbox=dummy_bbox,
                     cams=dummy_cams,
                     height=dummy_height,
@@ -182,12 +201,11 @@ def main():
 
                 # Calculate loss (MSE for now)
                 loss = F.mse_loss(predicted_noise, noise, reduction="mean")
-                
-                accelerator.backward(loss)
 
+                accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(model.parameters(), training_config.max_grad_norm)
-                
+
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
