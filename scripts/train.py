@@ -133,13 +133,22 @@ def main():
                 vae.to(device)
                 with torch.no_grad():
                     # Encode GT
-                    latents_gt = vae.encode(dummy_gt_video)  # (1, 4, 1, 32, 32)
+                    latents_gt = vae.encode(dummy_gt_video)  # (1, 4, T', H', W')
+                    _, _, latent_T, latent_H, latent_W = latents_gt.shape
 
                     # Encode conditioning cameras
+                    # Encode conditioning cameras
                     cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
-                    cond_latents = vae.encode(cond_reshaped)  # (4, 4, 1, 32, 32)
-                    cond_latents = cond_latents.view(B, N_COND, 4, 1, 32, 32)
-                    cond_cam_latents = cond_latents.view(B, N_COND * 4, 1, 32, 32)  # (1, 16, 1, 32, 32)
+                    cond_latents = vae.encode(cond_reshaped)  # (B*N_COND, 4, T', H', W')
+
+                    # Infer latent spatial dimensions
+                    _, _, latent_T, latent_H, latent_W = cond_latents.shape
+
+                    # Reshape: (B, N_COND, 4, T', H', W')
+                    cond_latents = cond_latents.view(B, N_COND, 4, latent_T, latent_H, latent_W)
+
+                    # Collapse: (B, N_COND*4, T', H', W') → (1, 16, 1, 32, 32)
+                    cond_cam_latents = cond_latents.view(B, N_COND * 4, latent_T, latent_H, latent_W)  # (1, 16, 1, 32, 32)
                 vae.to("cpu")
                 torch.cuda.empty_cache()
 
