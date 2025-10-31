@@ -19,23 +19,19 @@ from einops import repeat
 torch.backends.cudnn.benchmark = False
 torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
-def tile_vae_encode(vae, video, tile_size=64, overlap=8):
+def tile_vae_encode(vae, video, tile_size=128, overlap=16):
 
     B, C, T, H, W = video.shape
 
     step = tile_size - overlap
 
-    latent_tile_H = tile_size // 8
+    tiles = []
 
-    latent_tile_W = tile_size // 8
-
-    tiles = []  # List of latents with metadata (shape for dynamic slice)
+    tile_positions = []  # (row_start_latent, col_start_latent)
 
 
 
     # Extract tiles
-
-    tile_positions = []  # (row_start, col_start) for stitching
 
     for row in range(0, H, step):
 
@@ -57,8 +53,6 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
                 latent_tile = vae.encode(tile)
 
-            # Trim to actual size
-
             actual_h = (end_row - row) // 8
 
             actual_w = (end_col - col) // 8
@@ -67,7 +61,7 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
             tiles.append(latent_tile)
 
-            tile_positions.append((row // 8, col // 8))  # Latent pos
+            tile_positions.append((row // 8, col // 8))
 
             del tile, latent_tile
 
@@ -77,7 +71,7 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
 
 
-    # Stitch: Iterate over actual tiles (no grid assumption)
+    # Stitch: Iterate over actual tiles (dynamic, no grid)
 
     latent_H = H // 8
 
@@ -135,7 +129,7 @@ from config import model as model_config_dict, vae as vae_config_dict, scheduler
 
 
 
-# --- Training Configuration (can be moved to config.py later)---
+# --- Training Configuration (can be moved to config.py later) ---
 
 class TrainingConfig:
 
@@ -149,7 +143,7 @@ class TrainingConfig:
 
     lr_warmup_steps = 500
 
-    mixed_precision = 'bf16'  # fp16 spikes on softmax; bf16 stable + half memory
+    mixed_precision = 'bf16'  # Stable for softmax, no fp32 cast
 
     output_dir = './training_checkpoints'
 
@@ -331,9 +325,9 @@ def main():
 
 
 
-                # === DUMMY DATA (Reduced Res) ===
+                # === DUMMY DATA (Full Res) ===
 
-                B, T, C, H, W = 1, 1, 3, 128, 128  # Seq len 256, attn safe
+                B, T, C, H, W = 1, 1, 3, 256, 256  # Latent 32x32 for conv kernel
 
                 NC = 5
 
@@ -347,7 +341,7 @@ def main():
 
 
 
-                # === 3. Encode clean latents (Tiled, Fixed Loop) ===
+                # === 3. Encode clean latents (Tiled, Fixed) ===
 
                 torch.cuda.empty_cache()
 
@@ -358,6 +352,12 @@ def main():
                 with torch.no_grad():
 
                     clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
+
+                    # Pad to exact 32x32 if clipping
+
+                    if clean_gt_latent.shape[3] < 32:
+
+                        clean_gt_latent = F.pad(clean_gt_latent, (0, 32 - clean_gt_latent.shape[4], 0, 32 - clean_gt_latent.shape[3]), mode='constant', value=0)
 
                     B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
 
@@ -370,6 +370,12 @@ def main():
                     for i in range(B * N_COND):
 
                         cond_tile = tile_vae_encode(vae, cond_reshaped[i:i+1])
+
+                        # Pad to exact 32x32
+
+                        if cond_tile.shape[3] < 32:
+
+                            cond_tile = F.pad(cond_tile, (0, 32 - cond_tile.shape[4], 0, 32 - cond_tile.shape[3]), mode='constant', value=0)
 
                         cond_latents_tiled.append(cond_tile)
 
