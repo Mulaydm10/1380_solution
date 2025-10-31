@@ -119,49 +119,56 @@ def main():
 
                 # === DUMMY DATA (Replace with real batch later) ===
                 B, T, C, H, W = 1, 1, 3, 256, 256
-                NC = 4 # Number of conditioning cameras
+                NC = 5  # Total cameras: 1 front (GT) + 4 side
+                N_COND = NC - 1  # = 4 → conditioning cameras
                 device = accelerator.device
 
+                # === 1. Dummy GT video (front camera) ===
                 dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
-                dummy_cond_cam_raw = torch.randn(B, NC, C, T, H, W, device=device)
 
-                # Move VAE to GPU for encoding, then back to CPU
-                vae.to(accelerator.device)
+                # === 2. Dummy conditioning videos (4 side cameras) ===
+                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # (1, 4, 3, 1, 256, 256)
+
+                # === 3. Move VAE to GPU and encode ===
+                vae.to(device)
                 with torch.no_grad():
-                    latents = vae.encode(dummy_gt_video)
+                    # Encode GT
+                    latents_gt = vae.encode(dummy_gt_video)  # (1, 4, 1, 32, 32)
 
-                    cond_cam_reshaped = dummy_cond_cam_raw.view(B * NC, C, T, H, W)
-                    cond_latents = vae.encode(cond_cam_reshaped)
-                    # Reshape to (B, NC, latent_channels, latent_T, latent_H, latent_W)
-                    cond_latents = cond_latents.view(B, NC, cond_latents.shape[1], cond_latents.shape[2], cond_latents.shape[3], cond_latents.shape[4])
-                    # Reshape to (B, NC * latent_channels, latent_T, latent_H, latent_W)
-                    cond_cam_latents = cond_latents.view(B, NC * cond_latents.shape[2], cond_latents.shape[3], cond_latents.shape[4], cond_latents.shape[5])
-
+                    # Encode conditioning cameras
+                    cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
+                    cond_latents = vae.encode(cond_reshaped)  # (4, 4, 1, 32, 32)
+                    cond_latents = cond_latents.view(B, N_COND, 4, 1, 32, 32)
+                    cond_cam_latents = cond_latents.view(B, N_COND * 4, 1, 32, 32)  # (1, 16, 1, 32, 32)
                 vae.to("cpu")
+                torch.cuda.empty_cache()
 
-                # Predict noise (simplified for now, will use scheduler in Day 2/3)
-                noise = torch.randn_like(latents)
-                timesteps = torch.randint(0, 1000, (latents.shape[0],), device=accelerator.device)
-                noisy_latents = latents + noise # Simplified noise addition for now
-                
-                # Forward pass
-                # Placeholder: model_args needs to be adapted from inference_utils.py
-                # For now, we'll pass minimal args
-                # This will likely need adjustment once dataset returns proper conditioning
-                dummy_cond_cam = torch.randn(1, 4, 3, 256, 256).to(accelerator.device)
-                dummy_bbox = {"bboxes": torch.randn(1, 1, 10, 8, 3).to(accelerator.device), "classes": torch.randint(0, 8, (1, 1, 10)).to(accelerator.device), "masks": torch.ones(1, 1, 10).to(accelerator.device)}
-                dummy_cams = torch.randn(1, 1, 7, 3, 7).to(accelerator.device)
-                dummy_height = torch.tensor([256]).to(accelerator.device)
-                dummy_width = torch.tensor([256]).to(accelerator.device)
-                dummy_NC = 5 # Number of cameras
+                # === 4. Add noise to GT latents ===
+                noise = torch.randn_like(latents_gt)
+                timesteps = torch.randint(0, 1000, (B,), device=device).long()
+                noisy_latents = latents_gt + noise  # ← (1, 4, 1, 32, 32)
 
-                predicted_noise = model(noisy_latents, timesteps, 
-                                        cond_cam=cond_cam_latents, 
-                                        bbox=dummy_bbox, 
-                                        cams=dummy_cams, 
-                                        height=dummy_height, 
-                                        width=dummy_width, 
-                                        NC=NC)
+                # === 5. Dummy conditioning ===
+                dummy_bbox = {
+                    "bboxes": torch.randn(B, 1, 10, 8, 3, device=device),
+                    "classes": torch.randint(0, 8, (B, 1, 10), device=device),
+                    "masks": torch.ones(B, 1, 10, device=device)
+                }
+                dummy_cams = torch.randn(B, 1, 7, 3, 7, device=device)
+                dummy_height = torch.tensor([H], device=device)
+                dummy_width = torch.tensor([W], device=device)
+
+                # === 6. Forward ===
+                predicted_noise = model(
+                    noisy_latents,           # (1, 4, 1, 32, 32)
+                    timesteps,
+                    cond_cam=cond_cam_latents,  # (1, 16, 1, 32, 32)
+                    bbox=dummy_bbox,
+                    cams=dummy_cams,
+                    height=dummy_height,
+                    width=dummy_width,
+                    NC=NC  # 5
+                )
 
                 # Calculate loss (MSE for now)
                 loss = F.mse_loss(predicted_noise, noise, reduction="mean")
