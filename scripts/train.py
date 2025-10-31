@@ -29,11 +29,13 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
     latent_tile_W = tile_size // 8
 
-    tiles = []  # Flat list
+    tiles = []  # List of latents with metadata (shape for dynamic slice)
 
 
 
-    # Extract tiles (robust: append exactly as looped)
+    # Extract tiles
+
+    tile_positions = []  # (row_start, col_start) for stitching
 
     for row in range(0, H, step):
 
@@ -55,7 +57,7 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
                 latent_tile = vae.encode(tile)
 
-            # Trim to actual latent size (not fixed)
+            # Trim to actual size
 
             actual_h = (end_row - row) // 8
 
@@ -65,7 +67,9 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
             tiles.append(latent_tile)
 
-            del tile, latent_tile  # Explicit del
+            tile_positions.append((row // 8, col // 8))  # Latent pos
+
+            del tile, latent_tile
 
             torch.cuda.empty_cache()
 
@@ -73,15 +77,7 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
 
 
-    # Stitch (robust: use len for grid size)
-
-    num_tiles_h = int((H + step - 1) / step)
-
-    num_tiles_w = int((W + step - 1) / step)
-
-    if len(tiles) != num_tiles_h * num_tiles_w:
-
-        raise ValueError(f'Tiles mismatch: expected {num_tiles_h * num_tiles_w}, got {len(tiles)}')
+    # Stitch: Iterate over actual tiles (no grid assumption)
 
     latent_H = H // 8
 
@@ -93,31 +89,21 @@ def tile_vae_encode(vae, video, tile_size=64, overlap=8):
 
 
 
-    tile_idx = 0
+    for tile_idx, (row_start, col_start) in enumerate(tile_positions):
 
-    for r in range(num_tiles_h):
+        latent_tile = tiles[tile_idx]
 
-        for c in range(num_tiles_w):
+        row_end = min(row_start + latent_tile.shape[3], latent_H)
 
-            row_start = r * step // 8
+        col_end = min(col_start + latent_tile.shape[4], latent_W)
 
-            col_start = c * step // 8
+        h_slice = slice(row_start, row_end)
 
-            row_end = min(row_start + tiles[tile_idx].shape[3], latent_H)
+        w_slice = slice(col_start, col_end)
 
-            col_end = min(col_start + tiles[tile_idx].shape[4], latent_W)
+        stitched[:, :, :, h_slice, w_slice] += latent_tile[:, :, :, :row_end-row_start, :col_end-col_start]
 
-            h_slice = slice(row_start, row_end)
-
-            w_slice = slice(col_start, col_end)
-
-            stitched[:, :, :, h_slice, w_slice] += tiles[tile_idx][:, :, :, :row_end-row_start, :col_end-col_start]
-
-            count[:, :, :, h_slice, w_slice] += 1
-
-            tile_idx += 1
-
-            del tiles[tile_idx-1]  # Free tile
+        count[:, :, :, h_slice, w_slice] += 1
 
 
 
@@ -527,7 +513,7 @@ def main():
 
                 torch.cuda.synchronize()
 
-                del x, cond_cam, predicted_noise, target_pred
+                del x, cond_cam, clean_cond_latents, clean_gt_latent, predicted_noise, target_pred, noise
 
 
 
