@@ -327,7 +327,7 @@ def main():
 
                 # === DUMMY DATA (T=1 to avoid assertion) ===
 
-                B, T, C, H, W = 1, 1, 3, 256, 256  # T=1 passes assertion, latent_T=1
+                B, T, C, H, W = 1, 4, 3, 256, 256  # T=1 passes assertion, latent_T=1
 
                 NC = 5
 
