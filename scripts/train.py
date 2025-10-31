@@ -199,13 +199,7 @@ def main():
                 torch.cuda.synchronize()
 
                 # === DUMMY DATA (T=4 to reduce memory further, H=W=32 for even smaller latents) ===
-                B, T, C, H, W = (
-                    1,
-                    4,
-                    3,
-                    32,
-                    32,
-                )  # Further reduced sizes to help with OOM
+                B, T, C, H, W = 1, 8, 3, 128, 128
                 NC = 5
                 N_COND = NC - 1
                 device = accelerator.device
