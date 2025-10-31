@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-from accelerate import Accelerator
+from accelerate import Accelerator, cpu_offload
 from accelerate.utils import set_seed
 from transformers import get_cosine_schedule_with_warmup
 from tqdm import tqdm
@@ -20,48 +20,47 @@ torch.backends.cudnn.benchmark = False
 torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
 def tile_vae_encode(vae, video, tile_size=128, overlap=16):
-    """
-    Manual tiling for custom VAE: Split video spatially into tiles, encode sequentially, stitch latents.
-    For 256x256 -> 2x2 tiles (128x128 each, overlap for seamless).
-    """
     B, C, T, H, W = video.shape
-    tiles = []
-    latent_H_tile = tile_size // 8  # VAE downsample 8x
-    latent_W_tile = tile_size // 8
+    latent_H = H // 8
+    latent_W = W // 8
+    latent_tile_H = tile_size // 8
+    latent_tile_W = tile_size // 8
     latent_overlap = overlap // 8
+    tiles = []
 
-    # Split into 2x2 tiles
+    # Extract tiles
     for row in range(0, H, tile_size - overlap):
         for col in range(0, W, tile_size - overlap):
             end_row = min(row + tile_size, H)
             end_col = min(col + tile_size, W)
             tile = video[:, :, :, row:end_row, col:end_col]
-            # Pad if smaller
-            if tile.shape[3] < tile_size or tile.shape[4] < tile_size:
-                pad_h = tile_size - tile.shape[3]
-                pad_w = tile_size - tile.shape[4]
-                tile = F.pad(tile, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            # Pad to tile_size
+            pad_h = tile_size - tile.shape[3]
+            pad_w = tile_size - tile.shape[4]
+            tile = F.pad(tile, (0, pad_w, 0, pad_h), mode='constant', value=0)
             with torch.no_grad():
-                latent_tile = vae.encode(tile)
-            tiles.append(latent_tile[:, :, :, :latent_H_tile, :latent_W_tile])  # Trim pad
+                latent_tile = vae.encode(tile)[:, :, :, :latent_tile_H, :latent_tile_W]  # Trim pad
+            tiles.append(latent_tile)
             torch.cuda.empty_cache()
             gc.collect()
 
-    # Stitch latents (simple overlap average; for test OK)
+    # Stitch latents (average overlap)
     num_tiles_h = (H + tile_size - overlap - 1) // (tile_size - overlap)
     num_tiles_w = (W + tile_size - overlap - 1) // (tile_size - overlap)
-    stitched = torch.zeros(B, latent_tile.shape[1], T, H//8, W//8, device=latent_tile.device)  # Latent dims
-    count = torch.zeros_like(stitched[0:1])  # For average
+    stitched = torch.zeros(B, latent_tile.shape[1], T//4, latent_H, latent_W, device=video.device)
+    count = torch.zeros(B, 1, T//4, latent_H, latent_W, device=video.device)
 
     tile_idx = 0
     for r in range(num_tiles_h):
         for c in range(num_tiles_w):
-            row_start = r * (latent_H_tile - latent_overlap)
-            col_start = c * (latent_W_tile - latent_overlap)
-            row_end = min(row_start + latent_H_tile, stitched.shape[3])
-            col_end = min(col_start + latent_W_tile, stitched.shape[4])
-            stitched[:, :, :, row_start:row_end, col_start:col_end] += tiles[tile_idx][:, :, :, :row_end-row_start, :col_end-col_start]
-            count[:, :, :, row_start:row_end, col_start:col_end] += 1
+            row_start = r * (tile_size - overlap) // 8
+            col_start = c * (tile_size - overlap) // 8
+            row_end = min(row_start + latent_tile_H, latent_H)
+            col_end = min(col_start + latent_tile_W, latent_W)
+            h_slice = slice(row_start, row_end)
+            w_slice = slice(col_start, col_end)
+            stitched[:, :, :, h_slice, w_slice] += tiles[tile_idx][:, :, :, :row_end-row_start, :col_end-col_start]
+            count[:, :, :, h_slice, w_slice] += 1
             tile_idx += 1
 
     stitched /= count.clamp(min=1)
@@ -150,7 +149,7 @@ def main():
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    model.enable_model_cpu_offload()
+
 
     # 6. TRAINING LOOP
     if accelerator.is_main_process:
@@ -182,7 +181,7 @@ def main():
                 dummy_gt_video = torch.randn(B, C, T, H, W, device=device)  # fp32 default
                 dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
 
-                # === 3. Encode clean latents (Tiled for custom VAE) ===
+                # === 3. Encode clean latents (Manual Tiled) ===
                 torch.cuda.empty_cache()
                 gc.collect()
                 vae.to(device)
@@ -191,10 +190,10 @@ def main():
                     clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
                     B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
 
-                    # Tile cond (batched)
+                    # Tile cond cams sequentially
                     cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
                     cond_latents_tiled = []
-                    for i in range(cond_reshaped.shape[0]):
+                    for i in range(B * N_COND):
                         cond_tile = tile_vae_encode(vae, cond_reshaped[i:i+1])
                         cond_latents_tiled.append(cond_tile)
                         torch.cuda.empty_cache()
@@ -235,16 +234,11 @@ def main():
                 gc.collect()
                 torch.cuda.synchronize()
 
-                # === 7. Forward ===
-                predicted_noise = model(
-                    x, timesteps,
-                    cond_cam=cond_cam,
-                    bbox=expanded_bbox,
-                    cams=expanded_cams,
-                    height=dummy_height,
-                    width=dummy_width,
-                    NC=NC
-                )
+                # === 7. Forward with CPU Offload ===
+                def model_forward(x, timesteps, cond_cam, bbox, cams, height, width, NC):
+                    return model(x, timesteps, cond_cam=cond_cam, bbox=bbox, cams=cams, height=height, width=width, NC=NC)
+
+                predicted_noise = cpu_offload(model_forward, x=x, timesteps=timesteps, cond_cam=cond_cam, bbox=expanded_bbox, cams=expanded_cams, height=dummy_height, width=dummy_width, NC=NC)
 
                 # === 8. Loss ===
                 target_start = 3 * C_latent
