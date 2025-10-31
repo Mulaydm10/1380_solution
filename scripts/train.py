@@ -88,8 +88,6 @@ def main():
         param.requires_grad = False
     vae.to("cpu") # Keep VAE on CPU, move to GPU only when needed
 
-    # Enable VAE tiling for OOM fix
-    vae.enable_tiling()
 
     # 4. OPTIMIZER & SCHEDULER
     optimizer = AdamW(model.parameters(), lr=training_config.learning_rate, weight_decay=0.0)
