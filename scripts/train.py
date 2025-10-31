@@ -325,9 +325,9 @@ def main():
 
 
 
-                # === DUMMY DATA (Full Res) ===
+                # === DUMMY DATA (T=1 to avoid assertion) ===
 
-                B, T, C, H, W = 1, 4, 3, 256, 256  # latent_T=1, H/W=32
+                B, T, C, H, W = 1, 1, 3, 256, 256  # T=1 passes assertion, latent_T=1
 
                 NC = 5
 
@@ -341,7 +341,7 @@ def main():
 
 
 
-                # === 3. Encode clean latents (Tiled, Fixed) ===
+                # === 3. Encode clean latents (Tiled) ===
 
                 torch.cuda.empty_cache()
 
@@ -353,15 +353,19 @@ def main():
 
                     clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
 
-                    # Pad to exact (..., 1, 32, 32)
+                    # Repeat time to 2 if <2, pad spatial to 32x32
 
-                    if clean_gt_latent.shape[2] < 1:
+                    if clean_gt_latent.shape[2] < 2:
 
-                        clean_gt_latent = F.pad(clean_gt_latent, (0, 0, 0, 1 - clean_gt_latent.shape[2]), mode='constant', value=0)
+                        clean_gt_latent = clean_gt_latent.repeat(1, 1, 2, 1, 1)
 
                     if clean_gt_latent.shape[3] < 32:
 
-                        clean_gt_latent = F.pad(clean_gt_latent, (0, 32 - clean_gt_latent.shape[4], 0, 32 - clean_gt_latent.shape[3]), mode='constant', value=0)
+                        pad_h = 32 - clean_gt_latent.shape[3]
+
+                        pad_w = 32 - clean_gt_latent.shape[4]
+
+                        clean_gt_latent = F.pad(clean_gt_latent, (0, pad_w, 0, pad_h, 0, 0), mode='constant', value=0)
 
                     B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
 
@@ -375,15 +379,19 @@ def main():
 
                         cond_tile = tile_vae_encode(vae, cond_reshaped[i:i+1])
 
-                        # Pad to exact (..., 1, 32, 32)
+                        # Repeat time to 2, pad spatial
 
-                        if cond_tile.shape[2] < 1:
+                        if cond_tile.shape[2] < 2:
 
-                            cond_tile = F.pad(cond_tile, (0, 0, 0, 1 - cond_tile.shape[2]), mode='constant', value=0)
+                            cond_tile = cond_tile.repeat(1, 1, 2, 1, 1)
 
                         if cond_tile.shape[3] < 32:
 
-                            cond_tile = F.pad(cond_tile, (0, 32 - cond_tile.shape[4], 0, 32 - cond_tile.shape[3]), mode='constant', value=0)
+                            pad_h = 32 - cond_tile.shape[3]
+
+                            pad_w = 32 - cond_tile.shape[4]
+
+                            cond_tile = F.pad(cond_tile, (0, pad_w, 0, pad_h, 0, 0), mode='constant', value=0)
 
                         cond_latents_tiled.append(cond_tile)
 
