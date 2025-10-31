@@ -123,13 +123,13 @@ def main():
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()  # Ensure clears complete
 
-                # === DUMMY DATA (Minimized for VRAM) ===
+                # === DUMMY DATA (Minimized for VRAM - fp32 default) ===
                 B, T, C, H, W = 1, 1, 3, 256, 256  # Keep minimal
                 NC = 5
                 N_COND = NC - 1
                 device = accelerator.device
-                dummy_gt_video = torch.randn(B, C, T, H, W, device=device, dtype=torch.float16)  # fp16 from start
-                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device, dtype=torch.float16)
+                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)  # fp32 default
+                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # fp32 default
 
                 # === 3. Encode clean latents ===
                 torch.cuda.empty_cache()
@@ -157,16 +157,16 @@ def main():
                 x = clean_cond_latents
                 cond_cam = noisy_target
 
-                # === 6. Dummy conditioning (Minimized: 2 objects, direct expand) ===
+                # === 6. Dummy conditioning (Minimized: 2 objects, fp32 default) ===
                 num_objects = 2  # Reduced from 10 for VRAM
                 base_bbox = {
-                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device, dtype=torch.float16),
+                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device),  # fp32 default
                     "classes": torch.randint(0, 8, (B, 1, num_objects), device=device),
-                    "masks": torch.ones(B, 1, num_objects, device=device, dtype=torch.float16)
+                    "masks": torch.ones(B, 1, num_objects, device=device)
                 }
-                base_cams = torch.randn(B, 1, 7, 3, 7, device=device, dtype=torch.float16)
-                dummy_height = torch.tensor([H], device=device, dtype=torch.float16)
-                dummy_width = torch.tensor([W], device=device, dtype=torch.float16)
+                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)  # fp32 default
+                dummy_height = torch.tensor([H], device=device)
+                dummy_width = torch.tensor([W], device=device)
 
                 expanded_bbox = {k: repeat(v, "b ... -> (b nc) ...", nc=NC) for k, v in base_bbox.items()}
                 expanded_cams = repeat(base_cams, "b ... -> (b nc) ...", nc=NC)
