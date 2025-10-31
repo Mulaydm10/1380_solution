@@ -17,6 +17,7 @@ import pathlib
 from einops import repeat
 
 torch.backends.cudnn.benchmark = False
+torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
 # Project imports (assuming they are in PYTHONPATH)
 from src.data.dataset import SensorGenDataset # Using existing dataset
@@ -33,7 +34,7 @@ class TrainingConfig:
     gradient_accumulation_steps = 4 # Simulate batch size of 4
     learning_rate = 1e-5
     lr_warmup_steps = 500
-    mixed_precision = 'fp16' # Use fp16 for T4 compatibility
+    mixed_precision = 'bf16'  # Changed from 'fp16' — better for attention OOM
     output_dir = './training_checkpoints'
     seed = 42
     max_grad_norm = 1.0
@@ -87,6 +88,9 @@ def main():
         param.requires_grad = False
     vae.to("cpu") # Keep VAE on CPU, move to GPU only when needed
 
+    # Enable VAE tiling for OOM fix
+    vae.enable_tiling()
+
     # 4. OPTIMIZER & SCHEDULER
     optimizer = AdamW(model.parameters(), lr=training_config.learning_rate, weight_decay=0.0)
     
@@ -117,19 +121,19 @@ def main():
 
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(model):
-                # Ultra-aggressive OOM Guard: Clear before every step
+                # Ultra-aggressive OOM Guard
                 torch.cuda.empty_cache()
                 gc.collect()
                 if torch.cuda.is_available():
-                    torch.cuda.synchronize()  # Ensure clears complete
+                    torch.cuda.synchronize()
 
-                # === DUMMY DATA (Minimized for VRAM - fp32 default) ===
-                B, T, C, H, W = 1, 1, 3, 256, 256  # Keep minimal
+                # === DUMMY DATA (Ultra-Minimal) ===
+                B, T, C, H, W = 1, 1, 3, 256, 256
                 NC = 5
                 N_COND = NC - 1
                 device = accelerator.device
                 dummy_gt_video = torch.randn(B, C, T, H, W, device=device)  # fp32 default
-                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # fp32 default
+                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
 
                 # === 3. Encode clean latents ===
                 torch.cuda.empty_cache()
@@ -157,23 +161,24 @@ def main():
                 x = clean_cond_latents
                 cond_cam = noisy_target
 
-                # === 6. Dummy conditioning (Minimized: 2 objects, fp32 default) ===
-                num_objects = 2  # Reduced from 10 for VRAM
+                # === 6. Dummy conditioning (num_objects=1) ===
+                num_objects = 1  # Minimal for VRAM
                 base_bbox = {
-                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device),  # fp32 default
+                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device),
                     "classes": torch.randint(0, 8, (B, 1, num_objects), device=device),
                     "masks": torch.ones(B, 1, num_objects, device=device)
                 }
-                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)  # fp32 default
+                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)  # Keep small
                 dummy_height = torch.tensor([H], device=device)
                 dummy_width = torch.tensor([W], device=device)
 
                 expanded_bbox = {k: repeat(v, "b ... -> (b nc) ...", nc=NC) for k, v in base_bbox.items()}
                 expanded_cams = repeat(base_cams, "b ... -> (b nc) ...", nc=NC)
 
-                # Pre-forward clear (critical for attention)
+                # Pre-forward clear
                 torch.cuda.empty_cache()
                 gc.collect()
+                torch.cuda.synchronize()
 
                 # === 7. Forward ===
                 predicted_noise = model(
@@ -187,10 +192,11 @@ def main():
                 )
 
                 # === 8. Loss ===
-                target_start = 3 * C_latent  # 48
-                target_end = 4 * C_latent    # 64
+                target_start = 3 * C_latent
+                target_end = 4 * C_latent
                 target_pred = predicted_noise[:, target_start:target_end, :, :, :]
                 loss = F.mse_loss(target_pred, noise, reduction="mean")
+                print(f"Loss: {loss.item():.4f}")  # Monitor
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -200,7 +206,7 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
-                # Post-step ultra-clear
+                # Post-step clear
                 torch.cuda.empty_cache()
                 gc.collect()
                 torch.cuda.synchronize()
