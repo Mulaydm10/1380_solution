@@ -19,7 +19,7 @@ from einops import repeat
 torch.backends.cudnn.benchmark = False
 torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
-def tile_vae_encode(vae, video, tile_size=128, overlap=16):
+def tile_vae_encode(vae, video, tile_size=64, overlap=8):
     B, C, T, H, W = video.shape
     latent_H = H // 8
     latent_W = W // 8
@@ -28,7 +28,7 @@ def tile_vae_encode(vae, video, tile_size=128, overlap=16):
     latent_overlap = overlap // 8
     tiles = []
 
-    # Extract tiles
+    # Extract tiles with overlap
     for row in range(0, H, tile_size - overlap):
         for col in range(0, W, tile_size - overlap):
             end_row = min(row + tile_size, H)
@@ -41,13 +41,14 @@ def tile_vae_encode(vae, video, tile_size=128, overlap=16):
             with torch.no_grad():
                 latent_tile = vae.encode(tile)[:, :, :, :latent_tile_H, :latent_tile_W]  # Trim pad
             tiles.append(latent_tile)
+            del tile, latent_tile  # Explicit del
             torch.cuda.empty_cache()
             gc.collect()
 
-    # Stitch latents (average overlap)
+    # Stitch (average overlap)
     num_tiles_h = (H + tile_size - overlap - 1) // (tile_size - overlap)
     num_tiles_w = (W + tile_size - overlap - 1) // (tile_size - overlap)
-    stitched = torch.zeros(B, latent_tile.shape[1], T//4, latent_H, latent_W, device=video.device)
+    stitched = torch.zeros(B, tiles[0].shape[1], T//4, latent_H, latent_W, device=video.device)
     count = torch.zeros(B, 1, T//4, latent_H, latent_W, device=video.device)
 
     tile_idx = 0
@@ -62,8 +63,11 @@ def tile_vae_encode(vae, video, tile_size=128, overlap=16):
             stitched[:, :, :, h_slice, w_slice] += tiles[tile_idx][:, :, :, :row_end-row_start, :col_end-col_start]
             count[:, :, :, h_slice, w_slice] += 1
             tile_idx += 1
+            del tiles[tile_idx-1]  # Free tile
 
     stitched /= count.clamp(min=1)
+    torch.cuda.empty_cache()
+    gc.collect()
     return stitched
 
 # Project imports (assuming they are in PYTHONPATH)
@@ -81,7 +85,7 @@ class TrainingConfig:
     gradient_accumulation_steps = 4 # Simulate batch size of 4
     learning_rate = 1e-5
     lr_warmup_steps = 500
-    mixed_precision = 'bf16'  # Changed from 'fp16' — better for attention OOM
+    mixed_precision = 'bf16'  # fp16 spikes on softmax; bf16 stable + half memory
     output_dir = './training_checkpoints'
     seed = 42
     max_grad_norm = 1.0
@@ -167,30 +171,28 @@ def main():
 
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(model):
-                # Ultra-aggressive OOM Guard
+                # Ultra OOM Guard
                 torch.cuda.empty_cache()
                 gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                torch.cuda.synchronize()
 
-                # === DUMMY DATA (Ultra-Minimal) ===
-                B, T, C, H, W = 1, 1, 3, 256, 256
+                # === DUMMY DATA (Reduced Res for Seq Len 256) ===
+                B, T, C, H, W = 1, 1, 3, 128, 128  # Latent 16x16, attn 256x256 vs 1024x1024
                 NC = 5
                 N_COND = NC - 1
                 device = accelerator.device
-                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)  # fp32 default
+                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
                 dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
 
-                # === 3. Encode clean latents (Manual Tiled) ===
+                # === 3. Encode clean latents (Tiled) ===
                 torch.cuda.empty_cache()
                 gc.collect()
                 vae.to(device)
                 with torch.no_grad():
-                    # Tile GT
                     clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
                     B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
 
-                    # Tile cond cams sequentially
+                    # Tile cond cams
                     cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
                     cond_latents_tiled = []
                     for i in range(B * N_COND):
@@ -199,8 +201,10 @@ def main():
                         torch.cuda.empty_cache()
                         gc.collect()
                     cond_latents_raw = torch.cat(cond_latents_tiled, dim=0)
+                    del cond_latents_tiled  # Free
                     cond_latents_raw = cond_latents_raw.view(B, N_COND, C_latent, latent_T, latent_H, latent_W)
                     clean_cond_latents = cond_latents_raw.view(B, N_COND * C_latent, latent_T, latent_H, latent_W)
+                    del cond_latents_raw  # Free
 
                 vae.to("cpu")
                 torch.cuda.empty_cache()
@@ -215,14 +219,14 @@ def main():
                 x = clean_cond_latents
                 cond_cam = noisy_target
 
-                # === 6. Dummy conditioning (num_objects=1) ===
-                num_objects = 1  # Minimal for VRAM
+                # === 6. Dummy conditioning (Minimal) ===
+                num_objects = 1
                 base_bbox = {
                     "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device),
                     "classes": torch.randint(0, 8, (B, 1, num_objects), device=device),
                     "masks": torch.ones(B, 1, num_objects, device=device)
                 }
-                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)  # Keep small
+                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)
                 dummy_height = torch.tensor([H], device=device)
                 dummy_width = torch.tensor([W], device=device)
 
@@ -234,18 +238,23 @@ def main():
                 gc.collect()
                 torch.cuda.synchronize()
 
-                # === 7. Forward with CPU Offload ===
-                def model_forward(x, timesteps, cond_cam, bbox, cams, height, width, NC):
-                    return model(x, timesteps, cond_cam=cond_cam, bbox=bbox, cams=cams, height=height, width=width, NC=NC)
-
-                predicted_noise = cpu_offload(model_forward, x=x, timesteps=timesteps, cond_cam=cond_cam, bbox=expanded_bbox, cams=expanded_cams, height=dummy_height, width=dummy_width, NC=NC)
+                # === 7. Forward ===
+                predicted_noise = model(
+                    x, timesteps,
+                    cond_cam=cond_cam,
+                    bbox=expanded_bbox,
+                    cams=expanded_cams,
+                    height=dummy_height,
+                    width=dummy_width,
+                    NC=NC
+                )
 
                 # === 8. Loss ===
                 target_start = 3 * C_latent
                 target_end = 4 * C_latent
                 target_pred = predicted_noise[:, target_start:target_end, :, :, :]
                 loss = F.mse_loss(target_pred, noise, reduction="mean")
-                print(f"Loss: {loss.item():.4f}")  # Monitor
+                print(f"Loss: {loss.item():.4f}")
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -259,6 +268,7 @@ def main():
                 torch.cuda.empty_cache()
                 gc.collect()
                 torch.cuda.synchronize()
+                del x, cond_cam, predicted_noise, target_pred  # Explicit del latents
 
             # Logging
             if accelerator.sync_gradients:
