@@ -16,6 +16,8 @@ from tqdm import tqdm
 import pathlib
 from einops import repeat
 
+torch.backends.cudnn.benchmark = False
+
 # Project imports (assuming they are in PYTHONPATH)
 from src.data.dataset import SensorGenDataset # Using existing dataset
 from src.data.collate import Collate
@@ -49,6 +51,7 @@ def main():
         log_with="tensorboard",
         project_dir=os.path.join(training_config.output_dir, "logs")
     )
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
     
     if accelerator.is_main_process:
         os.makedirs(training_config.output_dir, exist_ok=True)
@@ -114,20 +117,21 @@ def main():
 
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(model):
-                # Enhanced OOM Guard: Clear before every step
+                # Ultra-aggressive OOM Guard: Clear before every step
                 torch.cuda.empty_cache()
                 gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()  # Ensure clears complete
 
-                # === DUMMY DATA ===
-                B, T, C, H, W = 1, 1, 3, 256, 256
+                # === DUMMY DATA (Minimized for VRAM) ===
+                B, T, C, H, W = 1, 1, 3, 256, 256  # Keep minimal
                 NC = 5
                 N_COND = NC - 1
                 device = accelerator.device
-                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
-                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
+                dummy_gt_video = torch.randn(B, C, T, H, W, device=device, dtype=torch.float16)  # fp16 from start
+                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device, dtype=torch.float16)
 
                 # === 3. Encode clean latents ===
-                # Pre-encode clear
                 torch.cuda.empty_cache()
                 gc.collect()
                 vae.to(device)
@@ -140,10 +144,10 @@ def main():
                     cond_latents_raw = cond_latents_raw.view(B, N_COND, C_latent, latent_T, latent_H, latent_W)
                     clean_cond_latents = cond_latents_raw.view(B, N_COND * C_latent, latent_T, latent_H, latent_W)
 
-                # Post-encode: Aggressive clear
                 vae.to("cpu")
                 torch.cuda.empty_cache()
                 gc.collect()
+                torch.cuda.synchronize()
 
                 # === 4. Add noise ===
                 noise = torch.randn_like(clean_gt_latent)
@@ -153,19 +157,23 @@ def main():
                 x = clean_cond_latents
                 cond_cam = noisy_target
 
-                # === 6. Dummy conditioning (expanded) ===
+                # === 6. Dummy conditioning (Minimized: 2 objects, direct expand) ===
+                num_objects = 2  # Reduced from 10 for VRAM
                 base_bbox = {
-                    "bboxes": torch.randn(B, 1, 10, 8, 3, device=device),
-                    "classes": torch.randint(0, 8, (B, 1, 10), device=device),
-                    "masks": torch.ones(B, 1, 10, device=device)
+                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device, dtype=torch.float16),
+                    "classes": torch.randint(0, 8, (B, 1, num_objects), device=device),
+                    "masks": torch.ones(B, 1, num_objects, device=device, dtype=torch.float16)
                 }
-                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)
-                dummy_height = torch.tensor([H], device=device)
-                dummy_width = torch.tensor([W], device=device)
+                base_cams = torch.randn(B, 1, 7, 3, 7, device=device, dtype=torch.float16)
+                dummy_height = torch.tensor([H], device=device, dtype=torch.float16)
+                dummy_width = torch.tensor([W], device=device, dtype=torch.float16)
 
-                from einops import repeat
                 expanded_bbox = {k: repeat(v, "b ... -> (b nc) ...", nc=NC) for k, v in base_bbox.items()}
                 expanded_cams = repeat(base_cams, "b ... -> (b nc) ...", nc=NC)
+
+                # Pre-forward clear (critical for attention)
+                torch.cuda.empty_cache()
+                gc.collect()
 
                 # === 7. Forward ===
                 predicted_noise = model(
@@ -192,11 +200,12 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
-                # Post-step clear (critical for next iter)
+                # Post-step ultra-clear
                 torch.cuda.empty_cache()
                 gc.collect()
+                torch.cuda.synchronize()
 
-            # Logging and saving
+            # Logging
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
