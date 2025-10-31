@@ -129,33 +129,34 @@ def main():
                 # === 2. Dummy conditioning videos (4 side cameras) ===
                 dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)  # (1, 4, 3, 1, 256, 256)
 
-                # === 3. Move VAE to GPU and encode ===
-                vae.to(device)
-                with torch.no_grad():
-                    # Encode GT
-                    latents_gt = vae.encode(dummy_gt_video)  # (1, 4, T', H', W')
-                    _, _, latent_T, latent_H, latent_W = latents_gt.shape
+                    # === 3. Encode GT and conditioning cameras ===
+                    vae.to(device)
 
-                    # Encode conditioning cameras
-                    # Encode conditioning cameras
+                    # GT: (B, C, T, H, W) → (B, 4, T', H', W')
+                    latents_gt = vae.encode(dummy_gt_video)
+                    B_gt, C_gt, latent_T, latent_H, latent_W = latents_gt.shape
+
+                    # Conditioning: (B, N_COND, C, T, H, W) → (B*N_COND, C, T, H, W)
                     cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
                     cond_latents = vae.encode(cond_reshaped)  # (B*N_COND, 4, T', H', W')
 
-                    # Infer latent spatial dimensions
-                    _, _, latent_T, latent_H, latent_W = cond_latents.shape
+                    # Infer from cond_latents
+                    _, C_cond, T_cond, H_cond, W_cond = cond_latents.shape
+                    assert T_cond == latent_T and H_cond == latent_H and W_cond == latent_W, "Latent sizes must match"
 
                     # Reshape: (B, N_COND, 4, T', H', W')
-                    cond_latents = cond_latents.view(B, N_COND, 4, latent_T, latent_H, latent_W)
+                    cond_latents = cond_latents.view(B, N_COND, C_cond, latent_T, latent_H, latent_W)
 
                     # Collapse: (B, N_COND*4, T', H', W') → (1, 16, 1, 32, 32)
-                    cond_cam_latents = cond_latents.view(B, N_COND * 4, latent_T, latent_H, latent_W)  # (1, 16, 1, 32, 32)
-                vae.to("cpu")
-                torch.cuda.empty_cache()
+                    cond_cam_latents = cond_latents.view(B, N_COND * C_cond, latent_T, latent_H, latent_W)
 
-                # === 4. Add noise to GT latents ===
-                noise = torch.randn_like(latents_gt)
-                timesteps = torch.randint(0, 1000, (B,), device=device).long()
-                noisy_latents = latents_gt + noise  # ← (1, 4, 1, 32, 32)
+                    vae.to("cpu")
+                    torch.cuda.empty_cache()
+
+                    # === 4. Add noise ===
+                    noise = torch.randn_like(latents_gt)
+                    timesteps = torch.randint(0, 1000, (B_gt,), device=device).long()
+                    noisy_latents = latents_gt + noise
 
                 # === 5. Dummy conditioning ===
                 dummy_bbox = {
