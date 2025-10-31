@@ -35,7 +35,7 @@ class TrainingConfig:
     seed = 42
     max_grad_norm = 1.0
     data_path = '/content/dataset/test_data_300/' # Colab path to dataset
-    num_workers = 4 # For DataLoader
+    num_workers = 2 # For DataLoader
 
 training_config = TrainingConfig()
 
@@ -117,15 +117,26 @@ def main():
                 torch.cuda.empty_cache()
                 gc.collect()
 
+                # === DUMMY DATA (Replace with real batch later) ===
+                B, T, C, H, W = 1, 1, 3, 256, 256
+                NC = 4 # Number of conditioning cameras
+                device = accelerator.device
+
+                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
+                dummy_cond_cam_raw = torch.randn(B, NC, C, T, H, W, device=device)
+
                 # Move VAE to GPU for encoding, then back to CPU
                 vae.to(accelerator.device)
                 with torch.no_grad():
-                    # Placeholder: Assuming batch["images_gt"] will contain ground truth images
-                    # This needs to be implemented in src/data/dataset.py
-                    # For now, we'll use a dummy tensor or adapt to existing output
-                    # If dataset doesn't return GT, this will crash. We'll fix in Day 2.
-                    dummy_gt_images = torch.randn(1, 3, 1, 256, 256).to(accelerator.device) # Placeholder (Batch, Channels, Frames, Height, Width)
-                    latents = vae.encode(dummy_gt_images) # Placeholder
+                    latents = vae.encode(dummy_gt_video)
+
+                    cond_cam_reshaped = dummy_cond_cam_raw.view(B * NC, C, T, H, W)
+                    cond_latents = vae.encode(cond_cam_reshaped)
+                    # Reshape to (B, NC, latent_channels, latent_T, latent_H, latent_W)
+                    cond_latents = cond_latents.view(B, NC, cond_latents.shape[1], cond_latents.shape[2], cond_latents.shape[3], cond_latents.shape[4])
+                    # Reshape to (B, NC * latent_channels, latent_T, latent_H, latent_W)
+                    cond_cam_latents = cond_latents.view(B, NC * cond_latents.shape[2], cond_latents.shape[3], cond_latents.shape[4], cond_latents.shape[5])
+
                 vae.to("cpu")
 
                 # Predict noise (simplified for now, will use scheduler in Day 2/3)
@@ -145,12 +156,12 @@ def main():
                 dummy_NC = 5 # Number of cameras
 
                 predicted_noise = model(noisy_latents, timesteps, 
-                                        cond_cam=dummy_cond_cam, 
+                                        cond_cam=cond_cam_latents, 
                                         bbox=dummy_bbox, 
                                         cams=dummy_cams, 
                                         height=dummy_height, 
                                         width=dummy_width, 
-                                        NC=dummy_NC)
+                                        NC=NC)
 
                 # Calculate loss (MSE for now)
                 loss = F.mse_loss(predicted_noise, noise, reduction="mean")
