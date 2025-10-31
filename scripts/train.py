@@ -19,6 +19,54 @@ from einops import repeat
 torch.backends.cudnn.benchmark = False
 torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
+def tile_vae_encode(vae, video, tile_size=128, overlap=16):
+    """
+    Manual tiling for custom VAE: Split video spatially into tiles, encode sequentially, stitch latents.
+    For 256x256 -> 2x2 tiles (128x128 each, overlap for seamless).
+    """
+    B, C, T, H, W = video.shape
+    tiles = []
+    latent_H_tile = tile_size // 8  # VAE downsample 8x
+    latent_W_tile = tile_size // 8
+    latent_overlap = overlap // 8
+
+    # Split into 2x2 tiles
+    for row in range(0, H, tile_size - overlap):
+        for col in range(0, W, tile_size - overlap):
+            end_row = min(row + tile_size, H)
+            end_col = min(col + tile_size, W)
+            tile = video[:, :, :, row:end_row, col:end_col]
+            # Pad if smaller
+            if tile.shape[3] < tile_size or tile.shape[4] < tile_size:
+                pad_h = tile_size - tile.shape[3]
+                pad_w = tile_size - tile.shape[4]
+                tile = F.pad(tile, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            with torch.no_grad():
+                latent_tile = vae.encode(tile)
+            tiles.append(latent_tile[:, :, :, :latent_H_tile, :latent_W_tile])  # Trim pad
+            torch.cuda.empty_cache()
+            gc.collect()
+
+    # Stitch latents (simple overlap average; for test OK)
+    num_tiles_h = (H + tile_size - overlap - 1) // (tile_size - overlap)
+    num_tiles_w = (W + tile_size - overlap - 1) // (tile_size - overlap)
+    stitched = torch.zeros(B, latent_tile.shape[1], T, H//8, W//8, device=latent_tile.device)  # Latent dims
+    count = torch.zeros_like(stitched[0:1])  # For average
+
+    tile_idx = 0
+    for r in range(num_tiles_h):
+        for c in range(num_tiles_w):
+            row_start = r * (latent_H_tile - latent_overlap)
+            col_start = c * (latent_W_tile - latent_overlap)
+            row_end = min(row_start + latent_H_tile, stitched.shape[3])
+            col_end = min(col_start + latent_W_tile, stitched.shape[4])
+            stitched[:, :, :, row_start:row_end, col_start:col_end] += tiles[tile_idx][:, :, :, :row_end-row_start, :col_end-col_start]
+            count[:, :, :, row_start:row_end, col_start:col_end] += 1
+            tile_idx += 1
+
+    stitched /= count.clamp(min=1)
+    return stitched
+
 # Project imports (assuming they are in PYTHONPATH)
 from src.data.dataset import SensorGenDataset # Using existing dataset
 from src.data.collate import Collate
@@ -102,6 +150,7 @@ def main():
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    model.enable_model_cpu_offload()
 
     # 6. TRAINING LOOP
     if accelerator.is_main_process:
@@ -133,16 +182,24 @@ def main():
                 dummy_gt_video = torch.randn(B, C, T, H, W, device=device)  # fp32 default
                 dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
 
-                # === 3. Encode clean latents ===
+                # === 3. Encode clean latents (Tiled for custom VAE) ===
                 torch.cuda.empty_cache()
                 gc.collect()
                 vae.to(device)
                 with torch.no_grad():
-                    clean_gt_latent = vae.encode(dummy_gt_video)
+                    # Tile GT
+                    clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
                     B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
 
+                    # Tile cond (batched)
                     cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
-                    cond_latents_raw = vae.encode(cond_reshaped)
+                    cond_latents_tiled = []
+                    for i in range(cond_reshaped.shape[0]):
+                        cond_tile = tile_vae_encode(vae, cond_reshaped[i:i+1])
+                        cond_latents_tiled.append(cond_tile)
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                    cond_latents_raw = torch.cat(cond_latents_tiled, dim=0)
                     cond_latents_raw = cond_latents_raw.view(B, N_COND, C_latent, latent_T, latent_H, latent_W)
                     clean_cond_latents = cond_latents_raw.view(B, N_COND * C_latent, latent_T, latent_H, latent_W)
 
