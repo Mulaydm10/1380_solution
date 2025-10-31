@@ -327,7 +327,7 @@ def main():
 
                 # === DUMMY DATA (Full Res) ===
 
-                B, T, C, H, W = 1, 1, 3, 256, 256  # Latent 32x32 for conv kernel
+                B, T, C, H, W = 1, 4, 3, 256, 256  # latent_T=1, H/W=32
 
                 NC = 5
 
@@ -353,7 +353,11 @@ def main():
 
                     clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
 
-                    # Pad to exact 32x32 if clipping
+                    # Pad to exact (..., 1, 32, 32)
+
+                    if clean_gt_latent.shape[2] < 1:
+
+                        clean_gt_latent = F.pad(clean_gt_latent, (0, 0, 0, 1 - clean_gt_latent.shape[2]), mode='constant', value=0)
 
                     if clean_gt_latent.shape[3] < 32:
 
@@ -371,7 +375,11 @@ def main():
 
                         cond_tile = tile_vae_encode(vae, cond_reshaped[i:i+1])
 
-                        # Pad to exact 32x32
+                        # Pad to exact (..., 1, 32, 32)
+
+                        if cond_tile.shape[2] < 1:
+
+                            cond_tile = F.pad(cond_tile, (0, 0, 0, 1 - cond_tile.shape[2]), mode='constant', value=0)
 
                         if cond_tile.shape[3] < 32:
 
