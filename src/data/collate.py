@@ -84,4 +84,22 @@ def pad_collate_recursive(batch):
 
 class Collate:
     def __call__(self, batch):
-        return pad_collate_recursive(batch)
+        result = {}
+        # List of keys that are known to have variable lengths
+        variable_len_keys = ["bboxes_3d", "map_lanes", "traffic_lights", "map_crosswalks"]
+
+        for key in batch[0].keys():
+            items = [d[key] for d in batch]
+            if key in variable_len_keys:
+                # This key has variable length, pad it
+                if items:
+                    padded_items = pad_sequence([torch.from_numpy(item) for item in items], batch_first=True, padding_value=0.0)
+                    result[key] = padded_items
+            else:
+                # This key should have a fixed size, try to stack it
+                try:
+                    result[key] = torch.stack(items)
+                except TypeError:
+                    # If stacking fails (e.g., for lists of strings), just keep it as a list
+                    result[key] = items
+        return result
