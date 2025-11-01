@@ -10,39 +10,56 @@ from .utils import zero_module
 
 import timm
 
+class BBoxEmbedder(nn.Module):  # Original/Stub – Embeds bboxes to tokens
+    def __init__(self, embed_dim=512, max_objs=100): # Increased max_objs for safety
+        super().__init__()
+        self.proj = nn.Linear(8*3, embed_dim)
+        self.pos_embed = nn.Parameter(torch.zeros(1, max_objs, embed_dim))
+
+    def forward(self, bboxes_dict):  # Padded dict input
+        data = bboxes_dict['data'] # Shape: [B, 1, 1, max_objs, 8, 3]
+        mask = bboxes_dict['mask'] # Shape: [B, 1, 1, max_objs]
+        
+        B, _, _, max_objs, _, _ = data.shape
+        data_flat = data.view(B, max_objs, -1) # Shape: [B, max_objs, 24]
+        
+        embeds = self.proj(data_flat)  # [B, max_objs, dim]
+        embeds = embeds + self.pos_embed[:, :max_objs, :]  # Pos
+        
+        # Apply mask
+        mask_unsqueezed = mask.squeeze(1).squeeze(1).unsqueeze(-1).float() # Shape: [B, max_objs, 1]
+        return embeds * mask_unsqueezed  # Mask padded; [B, max_objs, dim]
+
 class BEVEmbedder(nn.Module):
     def __init__(self, output_dim=1152):
         super().__init__()
         self.cnn = timm.create_model('efficientnet_b0', pretrained=False, num_classes=0, features_only=True)
-        # Example: EfficientNet-B0 produces [1280, 4, 4] features for a 256x256 input.
-        # We need to project this to the model's hidden size.
         self.proj = nn.Linear(1280, output_dim)
 
     def forward(self, bev):
-        # Input bev shape: [B, 5, 256, 256]
-        # EfficientNet expects 3 channels, we will use the first 3 (occ, lanes, crosswalks)
-        features = self.cnn(bev[:, :3, :, :])[-1] # Get features from last stage
-        features = features.flatten(2).transpose(1, 2)  # [B, C, H, W] -> [B, H*W, C]
-        tokens = self.proj(features) # [B, H*W, output_dim]
+        features = self.cnn(bev[:, :3, :, :])[-1]
+        features = features.flatten(2).transpose(1, 2)
+        tokens = self.proj(features)
         return tokens
 
-
-class ControlEmbedder(nn.Module): # Assuming a ControlEmbedder class exists or should be created
+class ControlEmbedder(nn.Module):
     def __init__(self, bbox_embedder, cam_embedder, bev_embedder):
         super().__init__()
         self.bbox_embedder = bbox_embedder
         self.cam_embedder = cam_embedder
         self.bev_embedder = bev_embedder
 
-    def forward(self, bboxes, cams, bev_grid=None, mask=None):
-        bbox_tokens = self.bbox_embedder(bboxes['bboxes']['data'], bboxes['classes']['data'], mask=mask)
-        cam_tokens = self.cam_embedder(cams)
+    def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
+        bbox_tokens = self.bbox_embedder(bboxes_dict)
+        cam_tokens, _ = self.cam_embedder.embed_cam(camera_params)
         
+        tokens = torch.cat([bbox_tokens, cam_tokens], dim=1)
+
         if bev_grid is not None and self.bev_embedder is not None:
             bev_tokens = self.bev_embedder(bev_grid)
-            return torch.cat([bbox_tokens, cam_tokens, bev_tokens], dim=1)
-        else:
-            return torch.cat([bbox_tokens, cam_tokens], dim=1)
+            tokens = torch.cat([tokens, bev_tokens], dim=1)
+        
+        return tokens
     def __init__(
         self,
         classes=["car", "truck", "bus", "utility", "person", "child", "obstacle", "traffic sign"],
