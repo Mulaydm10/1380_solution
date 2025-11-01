@@ -227,12 +227,9 @@ class STDiT3(PreTrainedModel):
 
         # base_token, should not be trainable
         self.register_buffer("base_token", torch.randn(self.hidden_size))
-        # init camera encoder
-        self.camera_embedder = load_module(config.cam_encoder_cls)(
-            out_dim=config.hidden_size, **config.cam_encoder_param
-        )
-        # init bbox encoder
-        self.bbox_embedder = load_module(config.bbox_embedder_cls)(**config.bbox_embedder_param)
+        # init unified control embedder
+        from .control_embedder import ControlEmbedder
+        self.control_embedder = ControlEmbedder(config)
 
         # base blocks
         drop_path = [x.item() for x in torch.linspace(0, config.drop_path, self.depth)]
@@ -332,25 +329,15 @@ class STDiT3(PreTrainedModel):
         cam_emb, _ = embedder.embed_cam(cam, mask, T=T, S=S)
         return cam_emb
 
-    def encode_cond_sequence(self, bbox, cams, drop_cond_mask, NC, bbox_mask=None):
-        # encode box
-        if bbox is not None:
-            drop_box_mask = repeat(drop_cond_mask[:, None], "b ... -> (b NC) ...", NC=NC)
-            bbox_emb = self.encode_box(bbox, drop_mask=drop_box_mask, bbox_mask=bbox_mask)  # B, T, box_len, dim
-            bbox_emb = self.base_token[None, None, None] + bbox_emb
-
-        # encode cam, just take from first frame
-        if cams is not None:
-            cam_emb = self.encode_cam(
-                cams[:, 0:1],
-                self.camera_embedder,
-                repeat(drop_cond_mask, "b -> b T", T=1),
-            )
-            cam_emb = rearrange(cam_emb, "(B 1 S) ... -> B 1 S ...", S=cams.shape[2])
-            cam_emb = self.base_token[None, None, None] + cam_emb
-
-        cond = torch.cat([cam_emb, bbox_emb], dim=2)  # B, T, len, dim
-        return cond, None
+    def encode_cond_sequence(self, bbox, cams, bev_grid, drop_cond_mask, NC):
+        # All embedding logic is now in ControlEmbedder
+        cond_tokens = self.control_embedder(
+            bboxes_dict=bbox,
+            camera_params=cams,
+            bev_grid=bev_grid,
+            # The mask for bboxes will be extracted from the bbox dict inside the embedder
+        )
+        return cond_tokens, None
 
     def forward(
         self,
