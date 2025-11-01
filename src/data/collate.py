@@ -38,9 +38,14 @@ def pad_collate_recursive(batch):
         return general_ragged_pad(batch)  # New: Catch inner np var-len
     elif isinstance(elem, (list, tuple)):
         # Check if any item in the sublists is a string
-        has_str = any(isinstance(item, str) for sublist in batch for item in sublist if isinstance(sublist, (list, tuple)))
-        
-        if has_str:
+        try:
+            # This will fail if there are strings
+            np.array(batch, dtype=np.float32)
+            is_numeric = True
+        except (TypeError, ValueError):
+            is_numeric = False
+
+        if not is_numeric:
             # Pad string lists with ''
             lengths = [len(d) for d in batch]
             max_len = max(lengths)
@@ -66,40 +71,19 @@ def pad_collate_recursive(batch):
                 masks.append(mask)
             
             return {'data': torch.from_numpy(np.stack(padded_data)), 'mask': torch.from_numpy(np.stack(masks))}
+
     elif isinstance(elem, dict):
         result = {}
         for key in elem:
             collated_value = pad_collate_recursive([d[key] for d in batch])
             if isinstance(collated_value, dict) and 'data' in collated_value:
                 result[key] = collated_value  # {'data': tensor, 'mask': tensor}
-                except Exception as e:
-                    # Handle non-tensor data like ride_id, camera_names, and bev_grid
-                    if key == 'bev_grid':
-                        result[key] = torch.stack([d[key] for d in batch])
-                    else:
-                        result[key] = [d[key] for d in batch]
+            else:
+                result[key] = collated_value
         return result
     else:
         return default_collate(batch)
 
 class Collate:
     def __call__(self, batch):
-        result = {}
-        # List of keys that are known to have variable lengths
-        variable_len_keys = ["bboxes_3d", "map_lanes", "traffic_lights", "map_crosswalks"]
-
-        for key in batch[0].keys():
-            items = [d[key] for d in batch]
-            if key in variable_len_keys:
-                # This key has variable length, pad it
-                if items:
-                    padded_items = pad_sequence([torch.from_numpy(item) for item in items], batch_first=True, padding_value=0.0)
-                    result[key] = padded_items
-            else:
-                # This key should have a fixed size, try to stack it
-                try:
-                    result[key] = torch.stack(items)
-                except TypeError:
-                    # If stacking fails (e.g., for lists of strings), just keep it as a list
-                    result[key] = items
-        return result
+        return pad_collate_recursive(batch)
