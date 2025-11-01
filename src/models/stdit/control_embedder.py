@@ -177,23 +177,26 @@ class ControlEmbedder(nn.Module):
         self.bev_embedder = BEVEmbedder(embed_dim=config.hidden_size)
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
-        # Extract from collated dict
-        bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(1)  # [B, max, 8, 3]
-        class_data = bboxes_dict['classes']['data'].squeeze(1).squeeze(1)  # [B, max]
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze(1).squeeze(1).unsqueeze(1).float()  # [B, 1, max_objs]  # [B, max]
+        # Full squeeze for all leading 1s (robust to pad dims)
+        bbox_data = bboxes_dict['bboxes']['data'].squeeze()  # Drops all dim=1
+        class_data = bboxes_dict['classes']['data'].squeeze()  # [B, max]
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().float()  # [B, max]
 
-        # Reshape for 3D expectation in BBoxEmbedder
-        B, max_objs, _, _ = bbox_data.shape
-        bbox_data_flat = bbox_data.view(B, max_objs, -1) # [B, max, 24]
-        class_data_3d = class_data.unsqueeze(-1) # [B, max, 1]
-        attention_mask_3d = attention_mask.unsqueeze(-1) # [B, max, 1]
-        
-        # BBox stream (original call, adapted)
+        # Reshape to 3D for original unpack "b t n"
+        if bbox_data.dim() == 3: # If batch size is 1, squeeze might remove it. Add it back.
+            bbox_data = bbox_data.unsqueeze(0)
+            class_data = class_data.unsqueeze(0)
+            attention_mask = attention_mask.unsqueeze(0)
+            
+        class_data = class_data.unsqueeze(-1)  # [B, max, 1]
+        attention_mask = attention_mask.unsqueeze(-1)  # [B, max, 1]
+
+        # Call with 3D masks
         bbox_tokens = self.bbox_embedder(
-            bboxes=bbox_data_flat,
-            classes=class_data_3d,
-            mask=attention_mask_3d,
-            null_mask=(1 - attention_mask_3d),
+            bboxes=bbox_data,
+            classes=class_data,
+            mask=attention_mask,
+            null_mask=(1 - attention_mask.squeeze(-1)).unsqueeze(-1),
             **kwargs
         )
         
