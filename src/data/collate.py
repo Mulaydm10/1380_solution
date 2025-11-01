@@ -37,18 +37,27 @@ def pad_collate_recursive(batch):
     elif isinstance(elem, np.ndarray):
         return general_ragged_pad(batch)  # New: Catch inner np var-len
     elif isinstance(elem, (list, tuple)):
-        # Existing pad_tensor for 1D lists (e.g., flat objs)
+        # Check if any str/object – skip pad, use default (for labels/classes)
+        # This assumes that if it's a list of lists, the inner lists are what vary.
+        # For simplicity, we check the first level for strings.
+        if any(isinstance(item, str) for item in elem):
+            return default_collate(batch)  # List of list[str] -> batched list; no mask needed
+        
+        # Numeric pad + mask
         lengths = [len(d) for d in batch]
         max_len = max(lengths)
         padded_data = []
         masks = []
         for d in batch:
-            pad_len = max_len - len(d)
-            padded = np.pad(np.array(d), (0, pad_len), mode='constant', constant_values=0)
+            arr_d = np.array(d, dtype=np.float32)  # Ensure numeric
+            pad_len = max_len - len(arr_d)
+            padded = np.pad(arr_d, (0, pad_len), mode='constant', constant_values=0)
             padded_data.append(padded)
-            mask = np.ones(len(d), dtype=bool)
+            
+            mask = np.ones(len(arr_d), dtype=bool)
             mask = np.pad(mask, (0, pad_len), mode='constant', constant_values=False)
             masks.append(mask)
+        
         return torch.from_numpy(np.stack(padded_data)), torch.from_numpy(np.stack(masks))
     elif isinstance(elem, dict):
         result = {}
