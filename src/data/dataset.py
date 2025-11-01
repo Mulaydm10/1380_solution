@@ -6,6 +6,7 @@ from .bev_raster import rasterize_bev
 from PIL import Image
 import torchvision.transforms as T
 import logging
+import pathlib  # ADDED: Import pathlib
 import os
 
 logger = logging.getLogger(__name__)
