@@ -111,8 +111,13 @@ class BBoxEmbedder(nn.Module):
             mask = mask.unsqueeze(-1)  # [B, max, 1]
 
         B, T, N = classes.shape
-        bboxes = rearrange(bboxes, "b n ... -> (b n) ...")
-
+        bboxes = rearrange(bboxes, "b t ... -> (b t) ...")
+        classes = rearrange(classes, "b t n -> (b t) n")
+        if null_mask is not None:
+            null_mask = rearrange(null_mask, "b t n -> (b t) n")
+        if mask is not None:
+            mask = rearrange(mask, "b t n -> (b t) n")
+        
         def handle_none_mask(_mask):
             if _mask is None:
                 _mask = torch.ones(len(bboxes), device=bboxes.device)
@@ -120,13 +125,10 @@ class BBoxEmbedder(nn.Module):
                 _mask = _mask.flatten()
             _mask = _mask.unsqueeze(-1).type_as(self.null_pos_feature)
             return _mask
-
         mask = handle_none_mask(mask)
         null_mask = handle_none_mask(null_mask)
 
-        # box
         pos_emb = self.fourier_embedder(bboxes)
-
         pos_emb = pos_emb.reshape(pos_emb.shape[0], -1).type_as(self.null_pos_feature)
         pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
         pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
@@ -198,7 +200,7 @@ class ControlEmbedder(nn.Module):
         # Full squeeze for all leading 1s (robust to pad dims)
         bbox_data = bboxes_dict['bboxes']['data'].squeeze()  # Drops all dim=1
         class_data = bboxes_dict['classes']['data'].squeeze()  # [B, max]
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze(1).squeeze(1).unsqueeze(1).float()  # [B, 1, max_objs]
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().float()  # [B, max]
 
         # Reshape to 3D for original unpack "b t n"
         if bbox_data.dim() == 3: # If batch size is 1, squeeze might remove it. Add it back.
