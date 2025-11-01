@@ -172,7 +172,8 @@ class ControlEmbedder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.bbox_embedder = BBoxEmbedder(**config.bbox_embedder_param)
-        self.cam_embedder = CamEmbedder(**config.cam_embedder_param)
+        cam_params = getattr(config, 'cam_embedder_param', {'input_dim': 3, 'out_dim': config.hidden_size, 'num': 7, 'after_proj': True})
+        self.cam_embedder = CamEmbedder(**cam_params)
         self.bev_embedder = BEVEmbedder(embed_dim=config.hidden_size)
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
