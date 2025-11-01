@@ -17,7 +17,7 @@ class SensorGenDataset(Dataset):
             scenes (list): путь до файлов
         """
         self.scenes = scenes
-        self.data_root = data_root
+        self.data_root = pathlib.Path(data_root)
         self.mode = mode
         self.image_size = image_size
 
