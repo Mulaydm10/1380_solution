@@ -209,27 +209,29 @@ class ControlEmbedder(nn.Module):
         self.bev_embedder = BEVEmbedder(embed_dim=config.hidden_size)
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
-        # Full squeeze for all leading 1s (robust to pad dims)
-        bbox_data = bboxes_dict['bboxes']['data'].squeeze()  # Drops all dim=1
-        class_data = bboxes_dict['classes']['data'].squeeze()  # [B, max]
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().float()  # [B, max]
+        # Extract & robust shape for 3D [B,T,N=1]
+        class_data = bboxes_dict['classes']['data'].squeeze()
+        if len(class_data.shape) == 1:  # Batch=1 over-squeeze to scalar
+            class_data = class_data.unsqueeze(0).unsqueeze(-1)  # [1, max, 1]
+        elif len(class_data.shape) == 2:
+            class_data = class_data.unsqueeze(-1)  # [B, max, 1]
 
-        # Reshape to 3D for original unpack "b t n"
-        if bbox_data.dim() == 3: # If batch size is 1, squeeze might remove it. Add it back.
-            bbox_data = bbox_data.unsqueeze(0)
-            class_data = class_data.unsqueeze(0)
-            attention_mask = attention_mask.unsqueeze(0)
-            
-        class_data = class_data.unsqueeze(-1)  # [B, max, 1]
-        attention_mask = attention_mask.unsqueeze(-1)  # [B, max, 1]
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze()
+        if len(attention_mask.shape) == 1:
+            attention_mask = attention_mask.unsqueeze(0).unsqueeze(-1)
+        elif len(attention_mask.shape) == 2:
+            attention_mask = attention_mask.unsqueeze(-1)
+        attention_mask = attention_mask.float()
 
-        # Call with 3D masks
+        null_mask = 1 - attention_mask.squeeze(-1)  # [B, max]
+        null_mask = null_mask.unsqueeze(-1)  # [B, max, 1]
+
+        # Now call (3D safe)
         bbox_tokens = self.bbox_embedder(
             bboxes=bbox_data,
             classes=class_data,
             mask=attention_mask,
-            null_mask=(1 - attention_mask.squeeze(-1)).unsqueeze(-1),
-            **kwargs
+            null_mask=null_mask
         )
         
         # Cam stream (original)
