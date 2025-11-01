@@ -2,29 +2,31 @@ import numpy as np
 import torch
 from torch.utils.data import default_collate
 
-def pad_nested_var_len(arr_list, pad_dim=2, pad_val=0.0):
-    """Pad multi-dimensional np arrays (e.g., 5D) along a specified variable dimension."""
-    if not arr_list or not isinstance(arr_list[0], np.ndarray) or len(arr_list[0].shape) < 3:
+def general_ragged_pad(arr_list, pad_val=0.0):
+    """General pad for ragged np arrays (var in any dim); return {'data': stacked_padded, 'mask': stacked_bool [B,*max_shape]}."""
+    if not arr_list or not isinstance(arr_list[0], np.ndarray) or len(arr_list[0].shape) < 2:  # Skip scalar/1D
         return default_collate([torch.as_tensor(a) for a in arr_list])
     
     shapes = [a.shape for a in arr_list]
-    max_n = max(s[pad_dim] for s in shapes)
-    padded = []
-    masks = []
+    ndim = len(shapes[0])
+    max_shape = tuple(max(s[i] for s in shapes) for i in range(ndim))
     
-    for arr in arr_list:
-        pad_width = [(0, 0)] * arr.ndim
-        pad_width[pad_dim] = (0, max_n - arr.shape[pad_dim])
+    padded = []
+    masks = []  # Full max_shape bool per arr
+    for idx, arr in enumerate(arr_list):
+        # Pad data: Per-dim post-pad
+        pad_width = [(0, max_shape[i] - arr.shape[i]) for i in range(ndim)]
         padded_arr = np.pad(arr, pad_width, mode='constant', constant_values=pad_val)
         padded.append(padded_arr)
         
-        # Create a mask for the valid (non-padded) part
-        mask = np.zeros(max_n, dtype=bool)
-        mask[:arr.shape[pad_dim]] = True
+        # Mask: Zeros max_shape; True on original shape
+        mask = np.zeros(max_shape, dtype=bool)
+        slices = tuple(slice(0, arr.shape[i]) for i in range(ndim))
+        mask[slices] = True
         masks.append(mask)
-
+    
     padded_data = torch.from_numpy(np.stack(padded)).float()
-    mask_data = torch.from_numpy(np.stack(masks)).bool()
+    mask_data = torch.from_numpy(np.stack(masks)).bool()  # [B, *max_shape] – Squeeze later if attn needs [B,seq]
     
     return {'data': padded_data, 'mask': mask_data}
 
@@ -33,21 +35,31 @@ def pad_collate_recursive(batch):
     if isinstance(elem, torch.Tensor):
         return default_collate(batch)
     elif isinstance(elem, np.ndarray):
-        # This will now handle the nested numpy arrays like bboxes
-        return pad_nested_var_len(batch)
+        return general_ragged_pad(batch)  # New: Catch inner np var-len
+    elif isinstance(elem, (list, tuple)):
+        # Existing pad_tensor for 1D lists (e.g., flat objs)
+        lengths = [len(d) for d in batch]
+        max_len = max(lengths)
+        padded_data = []
+        masks = []
+        for d in batch:
+            pad_len = max_len - len(d)
+            padded = np.pad(np.array(d), (0, pad_len), mode='constant', constant_values=0)
+            padded_data.append(padded)
+            mask = np.ones(len(d), dtype=bool)
+            mask = np.pad(mask, (0, pad_len), mode='constant', constant_values=False)
+            masks.append(mask)
+        return torch.from_numpy(np.stack(padded_data)), torch.from_numpy(np.stack(masks))
     elif isinstance(elem, dict):
         result = {}
         for key in elem:
             collated_value = pad_collate_recursive([d[key] for d in batch])
             if isinstance(collated_value, dict) and 'data' in collated_value:
-                # Unpack the data and mask from the returned dictionary
-                result[key] = collated_value['data']
-                result[f"{key}_mask"] = collated_value['mask']
+                result[key] = collated_value  # {'data': tensor, 'mask': tensor}
             else:
                 result[key] = collated_value
         return result
     else:
-        # Fallback for strings, numbers, etc.
         return default_collate(batch)
 
 class Collate:
