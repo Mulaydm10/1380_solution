@@ -44,6 +44,8 @@ def main():
     model.train()
     vae.eval() # VAE is not being trained
 
+    print(f"Scheduler type: {type(scheduler).__name__}")
+
     losses = []
     print(f"--- Running BEV Integration Test on {num_test_scenes} scenes ---")
 
@@ -64,30 +66,30 @@ def main():
             cond_cam_latents = cond_latents.view(B, N_COND * cond_latents.shape[2], cond_latents.shape[3], cond_latents.shape[4], cond_latents.shape[5])
             vae.to("cpu")
 
-        # Create noise and timesteps
+        # RFLOW noise schedule
+        t = torch.rand(gt_latents.shape[0], device=device).view(-1, 1, 1, 1, 1) # [B,1,1,1,1]
         noise = torch.randn_like(gt_latents)
-        timesteps = torch.randint(0, scheduler.num_timesteps, (B,), device=device).long()
-        noisy_latents = scheduler.add_noise(gt_latents, noise, timesteps)
+        noisy_latents = (1 - t) * gt_latents + t * noise
+        timesteps = t.squeeze(-1).squeeze(-1).squeeze(-1) # [B] float in [0,1]
 
         # Prepare conditioning for the model
-        # This part is simplified as we don't have a full control_embedder yet
-        # We pass the BEV grid directly to the model
-        bbox_data = batch['bboxes_3d_data']
-        camera_params = batch['camera_param']
-        bev_grid = batch['bev_grid']
+        # Instantiate ControlEmbedder
+        from src.models.stdit.control_embedder import ControlEmbedder
+        control_embedder_instance = ControlEmbedder(model.config) # model.config is STDiT3Config
+        control_embedder_instance.to(device) # Move to device
+
+        cond_emb = control_embedder_instance(
+            bboxes_dict=batch['bboxes_3d_data'],
+            camera_params=batch['camera_param'],
+            bev_grid=batch['bev_grid']
+        )
 
         # Forward pass
         with accelerator.autocast():
             predicted_noise = model(
                 noisy_latents,
                 timesteps,
-                cond_cam=cond_cam_latents,
-                bbox=bbox_data,
-                cams=camera_params, # This might need adjustment based on how control_embedder is built
-                height=torch.tensor([H], device=device),
-                width=torch.tensor([W], device=device),
-                NC=5, # As per Grok's analysis
-                bev_grid=bev_grid # Pass the BEV grid
+                encoder_hidden_states=cond_emb # Pass conditioning as encoder_hidden_states
             )
             loss = F.mse_loss(predicted_noise.float(), noise.float())
         
