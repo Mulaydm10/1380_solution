@@ -179,7 +179,7 @@ class ControlEmbedder(nn.Module):
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
         # Extract from collated dict (squeeze singletons)
         bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(1)
-        class_data = bboxes_dict['classes']['data'].squeeze(1).squeeze(1)
+        class_data = bboxes_dict['classes']['data'].squeeze(1).squeeze(1).unsqueeze(1)  # [B, 1, max_objs]
         attention_mask = bboxes_dict['bboxes']['mask'].squeeze(1).squeeze(1).float()
         
         # BBox stream (original call, adapted)
