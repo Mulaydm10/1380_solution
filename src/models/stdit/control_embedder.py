@@ -122,8 +122,14 @@ class BBoxEmbedder(nn.Module):
             mask = mask.squeeze(-1) if mask.size(-1) == 1 else mask.mean(-1, keepdim=True)
             mask = mask.unsqueeze(-1) if mask.dim() == 1 else mask
 
-        # Now multiply (broadcasts to [B*T, dim])
-        pos_emb = pos_emb * null_mask + self.null_pos_feature[None, :] * (1 - null_mask)
+        null_mask = handle_none_mask(null_mask)
+
+        # box
+        pos_emb = self.fourier_embedder(bboxes)
+
+        pos_emb = pos_emb.reshape(pos_emb.shape[0], -1).type_as(self.null_pos_feature)
+        pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
+        pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
 
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
