@@ -1,74 +1,52 @@
 import torch
-from torch.nn.utils.rnn import pad_sequence
-from typing import Dict, List, Any
-
-
-def to_gpu(x):
-    x = x.contiguous()
-    return x.cuda(non_blocking=True) if torch.cuda.is_available() else x
-
-
-def batch_to_gpu(batch):
-    for key, value in batch.items():
-        if isinstance(batch[key], torch.Tensor):
-            batch[key] = to_gpu(value)
-    return batch
-
-
-import torch
-import torch
 import numpy as np
 
-def pad_collate(batch):
-    """
-    A collate function that pads variable-length tensors to the max length in a batch.
-    It also creates an attention mask for the padded elements.
-    """
-    # Separate keys that need padding from those that don't
-    variable_len_keys = ["bboxes", "classes", "masks"]
-    result = {}
+def pad_tensor(data, max_len):
+    """Pads a list of numpy arrays to a max length and creates a mask."""
+    padded_data = []
+    masks = []
+    for item in data:
+        # This assumes the variable dimension is the first one.
+        pad_width = [(0, max_len - item.shape[0])] + [(0, 0)] * (item.ndim - 1)
+        padded_item = np.pad(item, pad_width, 'constant', constant_values=0)
+        padded_data.append(padded_item)
 
-    # Handle standard collation for most keys
-    for key in batch[0].keys():
-        if key != "bboxes_3d_data":
-            result[key] = torch.utils.data.default_collate([d[key] for d in batch])
-
-    # --- Custom Padding for bboxes_3d_data ---
-    bbox_data = [d["bboxes_3d_data"] for d in batch]
-    result["bboxes_3d_data"] = {}
-
-    # Find the max number of objects in this batch
-    max_num_objects = max(d["bboxes"].shape[2] for d in bbox_data)
-
-    for key in variable_len_keys:
-        padded_tensors = []
-        for i in range(len(batch)):
-            tensor = bbox_data[i][key]
-            num_objects = tensor.shape[2]
-            pad_size = max_num_objects - num_objects
-            
-            # The shape is (1, 1, num_objects, ...), so padding is on the 3rd dimension (index 2)
-            # We need to define padding for all dimensions after the one we are padding
-            # (pad_left, pad_right, pad_top, pad_bottom, ...)
-            padding = (0, 0) * (tensor.ndim - 3) + (0, pad_size)
-            padded_tensor = np.pad(tensor, ((0,0), (0,0), (0, pad_size)) + ((0,0),)*(tensor.ndim-3), 'constant', constant_values=0)
-            padded_tensors.append(padded_tensor)
-        
-        result["bboxes_3d_data"][key] = torch.from_numpy(np.concatenate(padded_tensors, axis=0))
-
-    # Create an attention mask for the bounding boxes
-    # Shape: (B, 1, 1, max_num_objects)
-    attention_masks = []
-    for i in range(len(batch)):
-        num_objects = bbox_data[i]["bboxes"].shape[2]
-        mask = np.zeros((1, 1, max_num_objects), dtype=np.float32)
-        mask[:, :, :num_objects] = 1.0
-        attention_masks.append(mask)
+        mask = np.zeros(max_len, dtype=np.float32)
+        mask[:item.shape[0]] = 1.0
+        masks.append(mask)
     
-    result["bboxes_3d_data"]["attention_mask"] = torch.from_numpy(np.concatenate(attention_masks, axis=0))
+    return torch.from_numpy(np.stack(padded_data)), torch.from_numpy(np.stack(masks))
 
-    return result
+def pad_collate_recursive(batch):
+    """
+    A recursive collate function that pads variable-length tensors in a batch.
+    """
+    elem = batch[0]
+    if isinstance(elem, np.ndarray):
+        # Check if this is a variable-length item by comparing shapes
+        if any(b.shape[0] != elem.shape[0] for b in batch):
+            max_len = max(b.shape[0] for b in batch)
+            padded_data, masks = pad_tensor(batch, max_len)
+            return {"data": padded_data, "mask": masks}
+        else:
+            return torch.utils.data.default_collate(batch)
+
+    elif isinstance(elem, dict):
+        result = {}
+        for key in elem:
+            collated_value = pad_collate_recursive([d[key] for d in batch])
+            # If padding returned a dict with data and mask, unpack it
+            if isinstance(collated_value, dict) and 'data' in collated_value:
+                result[key] = collated_value['data']
+                result[f"{key}_mask"] = collated_value['mask']
+            else:
+                result[key] = collated_value
+        return result
+
+    # Fallback for other data types (like strings, fixed-size tensors)
+    return torch.utils.data.default_collate(batch)
 
 class Collate:
     def __call__(self, batch):
-        return pad_collate(batch)
+        # The recursive function will handle the nested structure automatically
+        return pad_collate_recursive(batch)
