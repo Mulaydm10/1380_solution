@@ -25,7 +25,7 @@ def main():
     device = accelerator.device
 
     # --- Dataloader ---
-    scenes = [p.name for p in os.listdir(data_path) if os.path.isdir(os.path.join(data_path, p))][:num_test_scenes]
+    scenes = [p for p in os.listdir(data_path) if os.path.isdir(os.path.join(data_path, p))][:num_test_scenes]
     dataset = SensorGenDataset(scenes, data_path, mode='train')
     collate_fn = Collate()
     dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, num_workers=2)
