@@ -180,7 +180,7 @@ class ControlEmbedder(nn.Module):
         # Extract from collated dict
         bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(1)  # [B, max, 8, 3]
         class_data = bboxes_dict['classes']['data'].squeeze(1).squeeze(1)  # [B, max]
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze(1).squeeze(1).float()  # [B, max]
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze(1).squeeze(1).unsqueeze(1).float()  # [B, 1, max_objs]  # [B, max]
 
         # Reshape for 3D expectation in BBoxEmbedder
         B, max_objs, _, _ = bbox_data.shape
