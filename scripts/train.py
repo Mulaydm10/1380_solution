@@ -297,15 +297,15 @@ def main():
 
                 # === 7. Forward ===
                 predicted_noise = model(
-                    x,
+                    noisy_latents,           # (1, 4, 2, 16, 16)
                     timesteps,
-                    cond_cam=cond_cam,
-                    bbox=expanded_bbox,
-                    cams=expanded_cams,
+                    cond_cam=clean_cond_latents,  # (1, 16, 2, 16, 16)
+                    bbox=dummy_bbox,
+                    cams=dummy_cams,
                     height=dummy_height,
                     width=dummy_width,
-                    NC=NC,
-                    bbox_mask=batch['bboxes_3d_data']['bboxes_mask']
+                    NC=NC,  # 5
+                    bev_grid=batch['bev_grid']
                 )
 
                 # === 8. Loss ===

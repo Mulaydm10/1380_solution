@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from .types import Scene
+from .bev_raster import rasterize_bev
 from PIL import Image
 import torchvision.transforms as T
 import logging
@@ -120,5 +121,8 @@ class SensorGenDataset(Dataset):
 
         result["ride_id"] = str(scene.ride_id)
         result["camera_names"] = scene.camera_names
+
+        if self.mode == 'train':
+            result['bev_grid'] = rasterize_bev(result['bboxes_3d_data'], result['map'])
 
         return result

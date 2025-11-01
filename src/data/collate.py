@@ -72,8 +72,12 @@ def pad_collate_recursive(batch):
             collated_value = pad_collate_recursive([d[key] for d in batch])
             if isinstance(collated_value, dict) and 'data' in collated_value:
                 result[key] = collated_value  # {'data': tensor, 'mask': tensor}
-            else:
-                result[key] = collated_value
+                except Exception as e:
+                    # Handle non-tensor data like ride_id, camera_names, and bev_grid
+                    if key == 'bev_grid':
+                        result[key] = torch.stack([d[key] for d in batch])
+                    else:
+                        result[key] = [d[key] for d in batch]
         return result
     else:
         return default_collate(batch)

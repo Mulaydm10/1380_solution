@@ -56,6 +56,7 @@ class STDiT3Block(nn.Module):
         )
 
         self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads)
+        self.bev_cross_attn = MultiHeadCrossAttention(hidden_size, num_heads)
 
         self.norm2 = get_layernorm(
             hidden_size, eps=1e-6, affine=False, use_kernel=enable_layernorm_kernel
@@ -113,6 +114,11 @@ class STDiT3Block(nn.Module):
         x_c = self.cross_attn(x, y[:, 0], None)
 
         x = x + x_c
+
+        # BEV cross attn
+        if y.shape[1] > 1:
+            x_bev = self.bev_cross_attn(x, y[:, 1], None)
+            x = x + x_bev
 
         ######################
         # MLP
