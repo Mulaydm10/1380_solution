@@ -273,13 +273,22 @@ class STDiT3(PreTrainedModel):
                     nn.init.constant_(module.bias, 0)
 
         # zero init embedder proj
-        if self.bbox_embedder is not None:
-            _zero_init(self.bbox_embedder.after_proj)
-        if self.camera_embedder is not None:
-            _zero_init(self.camera_embedder.after_proj)
+        if hasattr(self, 'control_embedder') and self.control_embedder is not None:
+            if self.control_embedder.bbox_embedder is not None and hasattr(self.control_embedder.bbox_embedder, 'after_proj'):
+                _zero_init(self.control_embedder.bbox_embedder.after_proj)
+            if self.control_embedder.cam_embedder is not None and hasattr(self.control_embedder.cam_embedder, 'after_proj'):
+                _zero_init(self.control_embedder.cam_embedder.after_proj)
+            if self.control_embedder.cam_embedder is not None and hasattr(self.control_embedder.cam_embedder, 'emb2token'):
+                nn.init.normal_(self.control_embedder.cam_embedder.emb2token.weight, std=0.02)
+        else:
+            # Fallback for original structure if control_embedder not present
+            if self.bbox_embedder is not None:
+                _zero_init(self.bbox_embedder.after_proj)
+            if self.camera_embedder is not None:
+                _zero_init(self.camera_embedder.after_proj)
 
-        if self.camera_embedder is not None:
-            nn.init.normal_(self.camera_embedder.emb2token.weight, std=0.02)
+            if self.camera_embedder is not None:
+                nn.init.normal_(self.camera_embedder.emb2token.weight, std=0.02)
 
     def get_dynamic_size(self, x):
         _, _, T, H, W = x.size()
