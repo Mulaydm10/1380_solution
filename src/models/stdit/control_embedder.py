@@ -92,14 +92,31 @@ class BBoxEmbedder(nn.Module):
         return emb
 
     def forward(self, bboxes, classes, null_mask=None, mask=None, **kwargs):
+        # Robust squeeze for pad dims (drop all 1s; handle 4D+)
+        if bboxes.dim() > 3:
+            bboxes = bboxes.squeeze()
+        if classes.dim() > 3:
+            classes = classes.squeeze()
+        if null_mask is not None and null_mask.dim() > 3:
+            null_mask = null_mask.squeeze()
+        if mask is not None and mask.dim() > 3:
+            mask = mask.squeeze()
+
+        if len(classes.shape) == 2:
+            classes = classes.unsqueeze(-1)
+        if null_mask is not None and len(null_mask.shape) == 2:
+            null_mask = null_mask.unsqueeze(-1)
+        if mask is not None and len(mask.shape) == 2:
+            mask = mask.unsqueeze(-1)
+
         B, T, N = classes.shape
-        bboxes = rearrange(bboxes, "b t n ... -> (b t) n ...")
+        bboxes = rearrange(bboxes, "b t ... -> (b t) ...")
         classes = rearrange(classes, "b t n -> (b t) n")
         if null_mask is not None:
             null_mask = rearrange(null_mask, "b t n -> (b t) n")
         if mask is not None:
             mask = rearrange(mask, "b t n -> (b t) n")
-        bboxes = rearrange(bboxes, "b n ... -> (b n) ...")
+        
         def handle_none_mask(_mask):
             if _mask is None:
                 _mask = torch.ones(len(bboxes), device=bboxes.device)
@@ -109,13 +126,16 @@ class BBoxEmbedder(nn.Module):
             return _mask
         mask = handle_none_mask(mask)
         null_mask = handle_none_mask(null_mask)
+
         pos_emb = self.fourier_embedder(bboxes)
         pos_emb = pos_emb.reshape(pos_emb.shape[0], -1).type_as(self.null_pos_feature)
         pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
         pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
+
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
         cls_emb = cls_emb * mask + self.mask_class_feature[None] * (1 - mask)
+
         emb = self.forward_feature(pos_emb, cls_emb)
         emb = rearrange(emb, "(b n) ... -> b n ...", n=N)
         if self.after_proj:
@@ -160,10 +180,9 @@ class BEVEmbedder(nn.Module):
         self.proj = nn.Linear(1280, embed_dim)
 
     def forward(self, bev_grid):
-        # EfficientNet expects 3 channels, we use the first 3 (occ, lanes, crosswalks)
-        features = self.cnn(bev_grid[:, :3, :, :])[-1] # Get features from last stage (e.g., shape [B, 1280, 8, 8])
-        features = features.flatten(2).transpose(1, 2)  # [B, C, H, W] -> [B, H*W, C]
-        tokens = self.proj(features) # [B, H*W, embed_dim]
+        features = self.cnn(bev_grid[:, :3, :, :])[-1]
+        features = features.flatten(2).transpose(1, 2)
+        tokens = self.proj(features)
         return tokens
 
 # --- New Unified Control Embedder ---
@@ -180,7 +199,7 @@ class ControlEmbedder(nn.Module):
         # Full squeeze for all leading 1s (robust to pad dims)
         bbox_data = bboxes_dict['bboxes']['data'].squeeze()  # Drops all dim=1
         class_data = bboxes_dict['classes']['data'].squeeze()  # [B, max]
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().float()  # [B, max]
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze(1).squeeze(1).unsqueeze(1).float()  # [B, 1, max_objs]
 
         # Reshape to 3D for original unpack "b t n"
         if bbox_data.dim() == 3: # If batch size is 1, squeeze might remove it. Add it back.
