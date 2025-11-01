@@ -210,28 +210,32 @@ class ControlEmbedder(nn.Module):
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
         # Extract & robust shape for 3D [B,T,N=1]
-        class_data = bboxes_dict['classes']['data'].squeeze()
-        if len(class_data.shape) == 1:  # Batch=1 over-squeeze to scalar
-            class_data = class_data.unsqueeze(0).unsqueeze(-1)  # [1, max, 1]
-        elif len(class_data.shape) == 2:
-            class_data = class_data.unsqueeze(-1)  # [B, max, 1]
-
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze()
+        bbox_data = bboxes_dict['bboxes']['data'].squeeze()  # [B, max,8,3] – Full squeeze for pad
+        class_data = bboxes_dict['classes']['data'].squeeze()  # [B, max]
+        
+        # Your existing mask logic...
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().float()  # [B, max]
         if len(attention_mask.shape) == 1:
             attention_mask = attention_mask.unsqueeze(0).unsqueeze(-1)
         elif len(attention_mask.shape) == 2:
             attention_mask = attention_mask.unsqueeze(-1)
-        attention_mask = attention_mask.float()
-
-        null_mask = 1 - attention_mask.squeeze(-1)  # [B, max]
-        null_mask = null_mask.unsqueeze(-1)  # [B, max, 1]
-
-        # Now call (3D safe)
+        
+        null_mask = 1 - attention_mask.squeeze(-1)
+        null_mask = null_mask.unsqueeze(-1)
+        
+        # Shape for classes (as before)
+        if len(class_data.shape) == 1:
+            class_data = class_data.unsqueeze(0).unsqueeze(-1)
+        elif len(class_data.shape) == 2:
+            class_data = class_data.unsqueeze(-1)
+        
+        # Now call (defined)
         bbox_tokens = self.bbox_embedder(
             bboxes=bbox_data,
             classes=class_data,
             mask=attention_mask,
-            null_mask=null_mask
+            null_mask=null_mask,
+            **kwargs
         )
         
         # Cam stream (original)
