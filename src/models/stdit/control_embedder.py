@@ -102,35 +102,28 @@ class BBoxEmbedder(nn.Module):
         if mask is not None and mask.dim() > 3:
             mask = mask.squeeze()
 
+        # Ensure 3D for unpack (B, T, N) where N=1 for class ID/mask
         if len(classes.shape) == 2:
-            classes = classes.unsqueeze(-1)
+            classes = classes.unsqueeze(-1)  # [B, max, 1]
         if null_mask is not None and len(null_mask.shape) == 2:
-            null_mask = null_mask.unsqueeze(-1)
+            null_mask = null_mask.unsqueeze(-1)  # [B, max, 1]
         if mask is not None and len(mask.shape) == 2:
-            mask = mask.unsqueeze(-1)
+            mask = mask.unsqueeze(-1)  # [B, max, 1]
 
         B, T, N = classes.shape
-        bboxes = rearrange(bboxes, "b t ... -> (b t) ...")
+        bboxes = rearrange(bboxes, "b t n ... -> (b t) n ...")
         classes = rearrange(classes, "b t n -> (b t) n")
         if null_mask is not None:
             null_mask = rearrange(null_mask, "b t n -> (b t) n")
+            null_mask = null_mask.squeeze(-1) if null_mask.size(-1) == 1 else null_mask.mean(-1, keepdim=True)
+            null_mask = null_mask.unsqueeze(-1) if null_mask.dim() == 1 else null_mask
         if mask is not None:
             mask = rearrange(mask, "b t n -> (b t) n")
-        
-        def handle_none_mask(_mask):
-            if _mask is None:
-                _mask = torch.ones(len(bboxes), device=bboxes.device)
-            else:
-                _mask = _mask.flatten()
-            _mask = _mask.unsqueeze(-1).type_as(self.null_pos_feature)
-            return _mask
-        mask = handle_none_mask(mask)
-        null_mask = handle_none_mask(null_mask)
+            mask = mask.squeeze(-1) if mask.size(-1) == 1 else mask.mean(-1, keepdim=True)
+            mask = mask.unsqueeze(-1) if mask.dim() == 1 else mask
 
-        pos_emb = self.fourier_embedder(bboxes)
-        pos_emb = pos_emb.reshape(pos_emb.shape[0], -1).type_as(self.null_pos_feature)
-        pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
-        pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
+        # Now multiply (broadcasts to [B*T, dim])
+        pos_emb = pos_emb * null_mask + self.null_pos_feature[None, :] * (1 - null_mask)
 
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
