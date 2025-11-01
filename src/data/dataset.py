@@ -59,19 +59,18 @@ class SensorGenDataset(Dataset):
         )[None]
         result["camera_param"] = np.concatenate([intrinsics, extrinsics[:, :, :-1]], axis=-1)
 
-        # --- NEW: Load Ground Truth Images ---
-        gt_images = []
-        for cam_name in self.target_cameras:
-            # The file names in the zip are like 'camera_side_left_forward.jpg', 
-            # but the scene object might use a different key. We will use the file names directly.
-            img_path = os.path.join(scene_path, 'images_gt', f"{cam_name}.jpg")
-            if os.path.exists(img_path):
-                img = Image.open(img_path).convert('RGB')
-                gt_images.append(self.transform(img))
-            else:
-                logger.warning(f"Missing GT image: {img_path}")
-                gt_images.append(torch.zeros(3, *self.image_size))
-        result['images_gt'] = torch.stack(gt_images)
+        # --- NEW: Load Ground Truth Images (only in train mode) ---
+        if self.mode == 'train':
+            gt_images = []
+            for cam_name in self.target_cameras:
+                img_path = os.path.join(scene_path, 'images_gt', f"{cam_name}.jpg")
+                if os.path.exists(img_path):
+                    img = Image.open(img_path).convert('RGB')
+                    gt_images.append(self.transform(img))
+                else:
+                    logger.warning(f"Missing GT image: {img_path}")
+                    gt_images.append(torch.zeros(3, *self.image_size))
+            result['images_gt'] = torch.stack(gt_images)
 
         # --- NEW: Load Conditioning Images for Training Mode ---
         if self.mode == 'train':
