@@ -16,6 +16,7 @@ def batch_to_gpu(batch):
 
 
 import torch
+import torch
 from torch.utils.data.dataloader import default_collate
 
 class Collate:
