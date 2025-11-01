@@ -291,7 +291,7 @@ class STDiT3(PreTrainedModel):
         W = W // self.patch_size[2]
         return (T, H, W)
 
-    def encode_box(self, bboxes, drop_mask):  # changed
+    def encode_box(self, bboxes, drop_mask, bbox_mask=None):  # changed
         B, T, seq_len = bboxes["bboxes"].shape[:3]
         bbox_embedder_kwargs = {}
         for k, v in bboxes.items():
@@ -313,7 +313,7 @@ class STDiT3(PreTrainedModel):
             bboxes=bbox_embedder_kwargs["bboxes"],
             classes=bbox_embedder_kwargs["classes"].type(torch.int32),
             null_mask=_null_mask,
-            mask=_mask,
+            mask=bbox_mask,  # Use the passed bbox_mask
             box_latent=bbox_embedder_kwargs.get("box_latent", None),
         )
         return bbox_emb
@@ -326,11 +326,11 @@ class STDiT3(PreTrainedModel):
         cam_emb, _ = embedder.embed_cam(cam, mask, T=T, S=S)
         return cam_emb
 
-    def encode_cond_sequence(self, bbox, cams, drop_cond_mask, NC):
+    def encode_cond_sequence(self, bbox, cams, drop_cond_mask, NC, bbox_mask=None):
         # encode box
         if bbox is not None:
             drop_box_mask = repeat(drop_cond_mask[:, None], "b ... -> (b NC) ...", NC=NC)
-            bbox_emb = self.encode_box(bbox, drop_mask=drop_box_mask)  # B, T, box_len, dim
+            bbox_emb = self.encode_box(bbox, drop_mask=drop_box_mask, bbox_mask=bbox_mask)  # B, T, box_len, dim
             bbox_emb = self.base_token[None, None, None] + bbox_emb
 
         # encode cam, just take from first frame
@@ -356,6 +356,7 @@ class STDiT3(PreTrainedModel):
         height,
         width,
         NC,
+        bbox_mask=None,
         drop_cond_mask=None,
         **kwargs,
     ):

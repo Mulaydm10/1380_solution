@@ -305,6 +305,7 @@ def main():
                     height=dummy_height,
                     width=dummy_width,
                     NC=NC,
+                    bbox_mask=batch['bboxes_3d_data']['bboxes_mask']
                 )
 
                 # === 8. Loss ===
