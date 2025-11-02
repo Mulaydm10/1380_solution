@@ -360,7 +360,7 @@ class STDiT3(PreTrainedModel):
 
         x = x.to(dtype)
 
-        cond_cam = rearrange(cond_cam, "(B NC) C T ... -> B NC C T ...", NC=1)
+
         x = torch.cat([x[:, :3], cond_cam, x[:, 3:]], dim=1)
         x = rearrange(x, "B NC C T ... -> (B NC) C T ...", NC=NC)
         timestep = timestep.to(dtype)
