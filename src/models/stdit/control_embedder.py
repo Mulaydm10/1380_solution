@@ -2,7 +2,7 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
+from einops import rearrange, repeat
 from .utils import zero_module
 import timm
 
@@ -130,10 +130,13 @@ class BBoxEmbedder(nn.Module):
         if null_mask is not None:
             null_mask = rearrange(null_mask, "b t n -> (b t) n")
             print(f"*** Post-Rearrange null_mask: {null_mask.shape}")
-        
+            null_mask = repeat(null_mask, 'bt n -> (bt N) n', N=8)  # Repeat for each corner
+            print(f"*** Expanded null_mask: {null_mask.shape}")
         if mask is not None:
             mask = rearrange(mask, "b t n -> (b t) n")
             print(f"*** Post-Rearrange mask: {mask.shape}")
+            mask = repeat(mask, 'bt n -> (bt N) n', N=8)  # Repeat for each corner
+            print(f"*** Expanded mask: {mask.shape}")
         
         def handle_none_mask(_mask):
             if _mask is None:
