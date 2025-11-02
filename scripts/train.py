@@ -24,6 +24,62 @@ torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
 
 
+import math
+import torch.nn as nn
+
+def partial_load_checkpoint(model, checkpoint_path, skip_prefixes=['x_embedder', 'final_layer'], init_skipped=True):
+    """
+    Loads matching keys from checkpoint; skips mismatches (e.g., channel changes).
+    Inits skipped layers randomly (kaiming) or zeros.
+    Returns: loaded_count, skipped_keys
+    """
+    print("=== Partial Checkpoint Load START ===")
+    state_dict = torch.load(checkpoint_path, map_location='cpu')
+    model_dict = model.state_dict()
+    loaded_count = 0
+    skipped_keys = []
+
+    for key, ckpt_value in state_dict.items():
+        if key not in model_dict:
+            print(f"[INFO] Unexpected key in checkpoint (skipping): {key}")
+            continue
+
+        model_value = model_dict[key]
+
+        if ckpt_value.shape == model_value.shape:
+            model_dict[key].copy_(ckpt_value)
+            loaded_count += 1
+            if 'spatial_blocks' in key:
+                print(f"[SUCCESS] Loaded core layer: {key[:70]}... (shape {ckpt_value.shape})")
+            else:
+                print(f"[INFO] Loaded other layer: {key[:70]}... (shape {ckpt_value.shape})")
+        else:
+            skipped_keys.append(key)
+            print(f"[WARNING] Shape mismatch (skipping): {key} – CKPT {ckpt_value.shape} vs MODEL {model_value.shape}")
+            if init_skipped:
+                if 'weight' in key:
+                    print(f"  -> Initializing weight with Kaiming Uniform: {key}")
+                    nn.init.kaiming_uniform_(model_value, a=math.sqrt(5))
+                else:
+                    print(f"  -> Initializing bias with Zeros: {key}")
+                    nn.init.zeros_(model_value)
+
+    model.load_state_dict(model_dict)
+    print("\n--- Load Summary ---")
+    print(f"Total keys in checkpoint: {len(state_dict)}")
+    print(f"Total keys in model: {len(model_dict)}")
+    print(f"Successfully loaded {loaded_count} matching keys.")
+    print(f"Skipped {len(skipped_keys)} mismatched keys: {skipped_keys}")
+    
+    core_preserved = all('spatial_blocks' not in k for k in skipped_keys)
+    print(f"Core `spatial_blocks` preserved: {core_preserved}")
+    print("=================================")
+    
+    if not core_preserved:
+        raise RuntimeError("Critical Error: Core spatial blocks were not loaded. Aborting.")
+        
+    return loaded_count, skipped_keys
+
 from config import model as model_config_dict  # Import configs
 from config import scheduler as scheduler_config_dict
 from config import vae as vae_config_dict
@@ -93,82 +149,12 @@ def main():
         print(f"[Model Build] Overriding model config. New config: {model_config_dict}")
     model = build_module(model_config_dict, MODELS)
 
-import math
-import torch.nn as nn
-
-def partial_load_checkpoint(model, checkpoint_path, skip_prefixes=['x_embedder', 'final_layer'], init_skipped=True):
-    """
-    Loads matching keys from checkpoint; skips mismatches (e.g., channel changes).
-    Inits skipped layers randomly (kaiming) or zeros.
-    Returns: loaded_count, skipped_keys
-    """
-    print("=== Partial Checkpoint Load START ===")
-    state_dict = torch.load(checkpoint_path, map_location='cpu')
-    model_dict = model.state_dict()
-    loaded_count = 0
-    skipped_keys = []
-
-    for key, ckpt_value in state_dict.items():
-        if key not in model_dict:
-            print(f"[INFO] Unexpected key in checkpoint (skipping): {key}")
-            continue
-
-        model_value = model_dict[key]
-
-        if ckpt_value.shape == model_value.shape:
-            model_dict[key].copy_(ckpt_value)
-            loaded_count += 1
-            if 'spatial_blocks' in key:
-                print(f"[SUCCESS] Loaded core layer: {key[:70]}... (shape {ckpt_value.shape})")
-            else:
-                print(f"[INFO] Loaded other layer: {key[:70]}... (shape {ckpt_value.shape})")
-        else:
-            skipped_keys.append(key)
-            print(f"[WARNING] Shape mismatch (skipping): {key} – CKPT {ckpt_value.shape} vs MODEL {model_value.shape}")
-            if init_skipped:
-                if 'weight' in key:
-                    print(f"  -> Initializing weight with Kaiming Uniform: {key}")
-                    nn.init.kaiming_uniform_(model_value, a=math.sqrt(5))
-                else:
-                    print(f"  -> Initializing bias with Zeros: {key}")
-                    nn.init.zeros_(model_value)
-
-    model.load_state_dict(model_dict)
-    print("\n--- Load Summary ---")
-    print(f"Total keys in checkpoint: {len(state_dict)}")
-    print(f"Total keys in model: {len(model_dict)}")
-    print(f"Successfully loaded {loaded_count} matching keys.")
-    print(f"Skipped {len(skipped_keys)} mismatched keys: {skipped_keys}")
-    
-    core_preserved = all('spatial_blocks' not in k for k in skipped_keys)
-    print(f"Core `spatial_blocks` preserved: {core_preserved}")
-    print("=================================")
-    
-    if not core_preserved:
-        raise RuntimeError("Critical Error: Core spatial blocks were not loaded. Aborting.")
-        
-    return loaded_count, skipped_keys
-
-# ... (rest of the imports)
-
-# --- Training Configuration (can be moved to config.py later) ---
-class TrainingConfig:
-    # ... (config class)
-
-# ... (main function definition)
-# Inside main(), replace the old load_state_dict call:
-
     # Load pre-trained weights for STDiT3 using the custom partial loader
     ckpt_path = "/content/1380-solution_github/checkpoints/ckpt/ema.pt"
     loaded_count, skipped_keys = partial_load_checkpoint(model, ckpt_path)
 
     if len(skipped_keys) > 50:
         raise ValueError("Over 50 mismatched keys, something is wrong with the checkpoint or model architecture.")
-
-    # --- Grok's Safeguard: Verify Fine-Tuning ---
-    if accelerator.is_main_process:
-        # This is now handled by the partial_load_checkpoint function
-        pass
 
 
 
