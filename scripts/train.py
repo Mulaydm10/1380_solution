@@ -95,7 +95,7 @@ def main():
     # This path needs to be relative to the Colab environment where the checkpoint is copied
     ckpt_path = "/content/1380-solution_github/checkpoints/ckpt/ema.pt"  # Path to pre-trained weights in local Colab storage
     state_dict = torch.load(ckpt_path, weights_only=True)
-    model.load_state_dict(state_dict, strict=True)
+    model.load_state_dict(state_dict, strict=False)
 
     # Gradient checkpointing not supported for STDiT3, skip to avoid error
     # model.gradient_checkpointing_enable()
