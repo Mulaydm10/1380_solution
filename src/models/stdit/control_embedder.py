@@ -228,7 +228,8 @@ class ControlEmbedder(nn.Module):
         # Unpack the dictionary of tensors
         print(f"[ControlEmbedder] Unpacking bboxes_dict. Keys: {bboxes_dict.keys()}")
         bbox_data = bboxes_dict['bboxes'].squeeze(1).squeeze(1)  # [B, max_objs,8,3]
-        class_data = bboxes_dict['classes'].squeeze(1).squeeze(1).float()  # [B, max_objs]
+        class_data = bboxes_dict['classes'].squeeze(1).squeeze(1).long()  # [B, max_objs] – MUST be long for indexing
+        print(f"[ControlEmbedder] Converted class_data to long. New dtype: {class_data.dtype}")
         attention_mask = bboxes_dict['masks'].squeeze(1).squeeze(1).any(dim=0).float() # Use the mask from the bboxes
         null_mask = 1 - attention_mask
 
