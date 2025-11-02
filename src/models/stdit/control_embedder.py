@@ -251,21 +251,11 @@ class ControlEmbedder(nn.Module):
         )
         
         # Cam stream (original)
-        # Get intrinsics dict (competition key)
-        intrinsics = camera_params.get('pinhole_intrinsics', camera_params.get('intrinsics', None))
-        if intrinsics is None:
-            raise KeyError("No 'pinhole_intrinsics' in camera_params – Check dataset.py JSON load")
-        
-        # Build K [3,3] matrix from attributes
-        K = torch.zeros(3,3, device=bbox_tokens.device, dtype=torch.float32)
-        K[0,0] = intrinsics['fx']
-        K[1,1] = intrinsics['fy']
-        K[0,2] = intrinsics['cx']
-        K[1,2] = intrinsics['cy']
-        K[2,2] = 1.0
+        # Extract the parameters for the first camera
+        cam_data = camera_params[:, 0, :, :] # Select first camera
 
-        # Call original (assume embed_cam takes [3,3] K)
-        cam_tokens, _ = self.cam_embedder.embed_cam(K)
+        # Call original
+        cam_tokens, _ = self.cam_embedder.embed_cam(cam_data)
         
         # BEV stream (new; optional)
         if bev_grid is not None:
