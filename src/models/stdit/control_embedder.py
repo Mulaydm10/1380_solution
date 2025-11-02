@@ -224,19 +224,15 @@ class ControlEmbedder(nn.Module):
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
         print(f"--- ControlEmbedder.forward START ---")
         # Bbox data processing
-        print(f"[ControlEmbedder] bboxes_dict type: {type(bboxes_dict)}")
-        print(f"[ControlEmbedder] bboxes_dict['bboxes'] keys: {bboxes_dict['bboxes'].keys()}")
-
-        bbox_data = bboxes_dict['bboxes']['data']
-        class_data = bboxes_dict['bboxes']['mask'] # This is misnamed in the source, it holds class data
-        attention_mask = bboxes_dict['bboxes']['mask']
+        # The collate function now provides tensors directly.
+        bbox_data = bboxes_dict['data']
+        class_data = bboxes_dict['mask']
+        attention_mask = bboxes_dict['mask']
         null_mask = 1 - attention_mask
 
         print(f"[ControlEmbedder] Shapes passed to BBoxEmbedder:")
         print(f"  - bboxes: {bbox_data.shape}, type: {bbox_data.dtype}")
         print(f"  - classes: {class_data.shape}, type: {class_data.dtype}")
-        print(f"  - mask: {attention_mask.shape}, type: {attention_mask.dtype}")
-        print(f"  - null_mask: {null_mask.shape}, type: {null_mask.dtype}")
 
         # Call BBoxEmbedder
         bbox_tokens = self.bbox_embedder(
