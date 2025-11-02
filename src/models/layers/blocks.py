@@ -329,6 +329,7 @@ class T2IFinalLayer(nn.Module):
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Linear(hidden_size, num_patch * out_channels, bias=True)
         self.scale_shift_table = nn.Parameter(torch.randn(2, hidden_size) / hidden_size**0.5)
+        print(f"T2IFinalLayer init: scale_shift_table shape {self.scale_shift_table.shape}")
         self.out_channels = out_channels
         self.d_t = d_t
         self.d_s = d_s

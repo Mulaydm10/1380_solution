@@ -346,7 +346,8 @@ class STDiT3(PreTrainedModel):
             x = self.spatial_blocks[block_i](x, y, t_mlp, T=T, S=S)  # No NC
 
         # === final layer ===
-        x = self.final_layer(x, t_emb, T=T, S=S)  # Drop repeat(t, NC)
+        print(f"[STDiT3.forward] t_emb shape for final_layer: {t_emb.shape}")
+        x = self.final_layer(x, t_emb, T=T, S=S)
 
         # === unpatchify ===
         x = self.unpatchify(x, T, H, W, Tx, Hx, Wx)  # No NC rearrange
