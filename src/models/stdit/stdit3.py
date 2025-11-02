@@ -303,32 +303,7 @@ class STDiT3(PreTrainedModel):
         W = W // self.patch_size[2]
         return (T, H, W)
 
-    def encode_box(self, bboxes, drop_mask, bbox_mask=None):  # changed
-        B, T, seq_len = bboxes["bboxes"].shape[:3]
-        bbox_embedder_kwargs = {}
-        for k, v in bboxes.items():
-            bbox_embedder_kwargs[k] = v.clone()
 
-        drop_mask = repeat(drop_mask, "B T -> B T S", S=seq_len)
-        _null_mask = torch.ones_like(bbox_embedder_kwargs["masks"])
-        _null_mask[bbox_embedder_kwargs["masks"] == 0] = 0
-        _mask = torch.ones_like(bbox_embedder_kwargs["masks"])
-        _mask[bbox_embedder_kwargs["masks"] == -1] = 0
-        _mask[
-            torch.logical_and(
-                bbox_embedder_kwargs["masks"] == 1,
-                drop_mask == 0,  # only drop those real boxes
-            )
-        ] = 0
-
-        bbox_emb = self.bbox_embedder(
-            bboxes=bbox_embedder_kwargs["bboxes"],
-            classes=bbox_embedder_kwargs["classes"].type(torch.int32),
-            null_mask=_null_mask,
-            mask=bbox_mask,  # Use the passed bbox_mask
-            box_latent=bbox_embedder_kwargs.get("box_latent", None),
-        )
-        return bbox_emb
 
     def encode_cam(self, cam, embedder, drop_mask):
         B, T, S = cam.shape[:3]
@@ -338,15 +313,8 @@ class STDiT3(PreTrainedModel):
         cam_emb, _ = embedder.embed_cam(cam, mask, T=T, S=S)
         return cam_emb
 
-    def encode_cond_sequence(self, bbox, cams, bev_grid, drop_cond_mask, NC):
-        # All embedding logic is now in ControlEmbedder
-        cond_tokens = self.control_embedder(
-            bboxes_dict=bbox,
-            camera_params=cams,
-            bev_grid=bev_grid,
-            # The mask for bboxes will be extracted from the bbox dict inside the embedder
-        )
-        return cond_tokens, None
+    def encode_cond_sequence(self, encoder_hidden_states):
+        return encoder_hidden_states, None # Return None for y_lens
 
     def forward(self, x, t, encoder_hidden_states=None, **kwargs):
         drop_cond_mask = None
@@ -361,7 +329,7 @@ class STDiT3(PreTrainedModel):
         x = x.to(dtype)
 
 
-        x = torch.cat([x[:, :3], cond_cam, x[:, 3:]], dim=1)
+
         x = rearrange(x, "B NC C T ... -> (B NC) C T ...", NC=NC)
         timestep = timestep.to(dtype)
 
@@ -380,7 +348,7 @@ class STDiT3(PreTrainedModel):
         t_mlp = self.t_block(t)
 
         # === get y embed ===
-        y, y_lens = self.encode_cond_sequence(bbox, cams, drop_cond_mask, NC)  # (B, L, D)
+        y = encoder_hidden_states
 
         # === get x embed ===
         x_b = self.x_embedder(x)  # [B, N, C]
