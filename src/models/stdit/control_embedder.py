@@ -256,7 +256,7 @@ class ControlEmbedder(nn.Module):
         print(f"camera_params type: {type(camera_params)}")
         cam_tensor = camera_params['data']
         print(f"cam_tensor shape: {cam_tensor.shape}")
-        K = cam_tensor[:, 0, :, :3]
+        K = cam_tensor[:, 0, :, :] # Select first camera, creating a [B, 3, 7] tensor
         print(f"Final K shape for embedder: {K.shape}")
         cam_tokens, _ = self.cam_embedder.embed_cam(K)
         print(f"cam_tokens shape: {cam_tokens.shape}")
