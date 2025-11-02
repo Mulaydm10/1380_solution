@@ -359,8 +359,7 @@ class STDiT3(PreTrainedModel):
             drop_cond_mask = torch.ones((B), device=x.device, dtype=x.dtype)
 
         x = x.to(dtype)
-        NC = 4 # Hardcoded for now, should be passed in
-        x = rearrange(x, "B (C NC) T ... -> B NC C T ...", NC=(NC - 1))
+
         cond_cam = rearrange(cond_cam, "(B NC) C T ... -> B NC C T ...", NC=1)
         x = torch.cat([x[:, :3], cond_cam, x[:, 3:]], dim=1)
         x = rearrange(x, "B NC C T ... -> (B NC) C T ...", NC=NC)
