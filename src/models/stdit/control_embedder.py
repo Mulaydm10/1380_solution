@@ -225,10 +225,10 @@ class ControlEmbedder(nn.Module):
         bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(2)
         print(f"Initial bbox_data shape: {bbox_data.shape}")
 
-        # Class data: Squeeze all, rebuild to [B, max_objs, 1]
-        class_data = bboxes_dict['classes']['data'].squeeze()  # [B,1,1,max] -> [max] (for B=1)
+        # Class data: Squeeze, cast to long for index (class IDs)
+        class_data = bboxes_dict['classes']['data'].squeeze().long()  # [B,1,1,max] -> [max] long (integral IDs)
         print(f"Squeezed class_data shape: {class_data.shape}")
-        class_data = class_data.unsqueeze(0).unsqueeze(-1)  # [1, max,1]
+        class_data = class_data.unsqueeze(0).unsqueeze(-1)  # [1, max,1] long
         print(f"Final class_data shape for BBoxEmbedder: {class_data.shape}")
 
         # Attention/null mask: Similar squeeze + rebuild to [1, max,1]
