@@ -205,6 +205,21 @@ def main():
                 control_embedder_instance = ControlEmbedder(model.config)
                 control_embedder_instance.to(accelerator.device)
 
+                # --- Extensive Logging to Debug bboxes_3d_data ---
+                if accelerator.is_main_process:
+                    print("--- Extensive BBox Debug Log START ---")
+                    def inspect_dict(d, indent=0):
+                        for k, v in d.items():
+                            if isinstance(v, dict):
+                                print(' ' * indent + f"Key: '{k}', Type: {type(v)}")
+                                inspect_dict(v, indent + 2)
+                            elif hasattr(v, 'shape'):
+                                print(' ' * indent + f"Key: '{k}', Type: {type(v)}, Shape: {v.shape}, Dtype: {v.dtype}")
+                            else:
+                                print(' ' * indent + f"Key: '{k}', Type: {type(v)}, Value: {v}")
+                    inspect_dict(batch['bboxes_3d_data'])
+                    print("--- Extensive BBox Debug Log END ---")
+
                 cond_emb = control_embedder_instance(
                     bboxes_dict=batch['bboxes_3d_data'],
                     camera_params=batch['camera_param'],
