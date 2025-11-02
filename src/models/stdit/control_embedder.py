@@ -223,18 +223,21 @@ class ControlEmbedder(nn.Module):
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
         print(f"--- ControlEmbedder.forward START ---")
-        # Bbox data processing
-        # The collate function now provides tensors directly.
-        bbox_data = bboxes_dict['data']
-        class_data = bboxes_dict['mask']
-        attention_mask = bboxes_dict['mask']
+
+        # Unpack nested padded dicts (from Collate)
+        bboxes_pad = bboxes_dict['bboxes']  # {'data': [B,1,1,max_objs,8,3], 'mask': [B,1,1,max_objs]}
+        classes_pad = bboxes_dict['classes']  # {'data': [B,1,1,max_objs], 'mask': [B,1,1,max_objs]}
+        masks_pad = bboxes_dict['masks']  # {'data': [B,1,1,max_objs,?], 'mask': [B,1,1,max_objs]}
+
+        # Extract tensors + filter w/ mask (squeeze batch dims for embedder)
+        bbox_data = bboxes_pad['data'].squeeze(1).squeeze(1)  # [B, max_objs,8,3]
+        class_data = classes_pad['data'].squeeze(1).squeeze(1).float()  # [B, max_objs] – Float for embed
+        attention_mask = bboxes_pad['mask'].squeeze(1).squeeze(1).float()  # [B, max_objs] – Shared mask
         null_mask = 1 - attention_mask
 
-        print(f"[ControlEmbedder] Shapes passed to BBoxEmbedder:")
-        print(f"  - bboxes: {bbox_data.shape}, type: {bbox_data.dtype}")
-        print(f"  - classes: {class_data.shape}, type: {class_data.dtype}")
+        print(f"[ControlEmbedder] Shapes to BBoxEmbedder: bboxes {bbox_data.shape}, classes {class_data.shape}, mask {attention_mask.shape}")
 
-        # Call BBoxEmbedder
+        # Call BBoxEmbedder (now fed properly)
         bbox_tokens = self.bbox_embedder(
             bboxes=bbox_data,
             classes=class_data,

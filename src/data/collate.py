@@ -86,27 +86,30 @@ def pad_collate_recursive(batch):
 
 class Collate:
     def __call__(self, batch):
-        # More robust handling of bboxes_3d_data
         print("--- Custom Collate Start ---")
-        
-        # Separate bboxes from the rest of the batch
-        bboxes_list = [d.pop('bboxes_3d_data') for d in batch]
-        
-        # Collate the rest of the batch using the recursive function
+
+        # Separate full bboxes_3d_data dicts
+        bboxes_lists = [d.pop('bboxes_3d_data') for d in batch]  # List of {'bboxes':list coords, 'classes':list IDs, 'masks':list vis}
+
+        # Collate rest
         collated_batch = pad_collate_recursive(batch)
         print(f"[Collate] Collated batch keys: {list(collated_batch.keys())}")
 
-        # Now, specifically collate the bboxes
-        # We need to extract the actual numpy arrays from the nested dict
-        bbox_arrays = [b['bboxes'] for b in bboxes_list]
-        collated_bboxes = general_ragged_pad(bbox_arrays)
-        print(f"[Collate] Collated bboxes['data'] shape: {collated_bboxes['data'].shape}")
-        print(f"[Collate] Collated bboxes['mask'] shape: {collated_bboxes['mask'].shape}")
+        # Pad each component separately (ragged per scene)
+        bboxes_pad = general_ragged_pad([b['bboxes'] for b in bboxes_lists])  # Coords [max_objs,8,3]
+        classes_pad = general_ragged_pad([b['classes'] for b in bboxes_lists])  # IDs [max_objs]
+        masks_pad = general_ragged_pad([b['masks'] for b in bboxes_lists])  # Vis [max_objs,6?] – Adjust dim if needed
 
-        # Re-integrate the correctly padded bboxes into the final batch
+        print(f"[Collate] Padded shapes – Bboxes data: {bboxes_pad['data'].shape}, mask: {bboxes_pad['mask'].shape}")
+        print(f"[Collate] Classes data: {classes_pad['data'].shape}, mask: {classes_pad['mask'].shape}")
+        print(f"[Collate] Masks data: {masks_pad['data'].shape}, mask: {masks_pad['mask'].shape}")
+
+        # Re-integrate full padded dict
         collated_batch['bboxes_3d_data'] = {
-            'bboxes': collated_bboxes
+            'bboxes': bboxes_pad,
+            'classes': classes_pad,
+            'masks': masks_pad
         }
-        
+
         print("--- Custom Collate End ---")
         return collated_batch
