@@ -117,7 +117,8 @@ class STDiT3Block(nn.Module):
 
         # BEV cross attn
         if y.shape[1] > 1:
-            x_bev = self.bev_cross_attn(x, y[:, 1], None)  # y[1] = BEV tokens
+            print(f"[STDiT3Block.forward] BEV cond shape: {y[:, 1:2].shape}")
+            x_bev = self.bev_cross_attn(x, y[:, 1:2], None)  # y[1] = BEV tokens
             x = x + x_bev
 
         ######################
