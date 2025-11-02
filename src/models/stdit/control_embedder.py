@@ -92,9 +92,11 @@ class BBoxEmbedder(nn.Module):
         return emb
 
     def forward(self, bboxes, classes, null_mask=None, mask=None, **kwargs):
+        print(f"Pre-squeeze classes: {classes.shape}") # DEBUG
         # NEW: Robust input squeeze (drop all 1s for pad dims)
         bboxes = bboxes.squeeze()  # [B,1,1,max,8,3] -> [B, max,8,3]
         classes = classes.squeeze()  # [B,1,1,max] -> [B, max]
+        print(f"Post-squeeze classes: {classes.shape}") # DEBUG
         if len(classes.shape) == 2:
             classes = classes.unsqueeze(-1)  # [B, max, 1]
         
