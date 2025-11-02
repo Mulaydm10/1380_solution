@@ -160,7 +160,7 @@ class BBoxEmbedder(nn.Module):
         print(f"Post-forward_feature: emb={emb.shape}")
 
         # Rearrange back to sequence
-        emb = rearrange(emb, "(b t) d -> b t d", b=B, t=T)
+        emb = rearrange(emb, "(b t) d -> b t d", b=B, t=N_objs)
         print(f"Final rearrange: emb={emb.shape}")
 
         if self.after_proj:
