@@ -56,7 +56,7 @@ class STDiT3Block(nn.Module):
         )
 
         self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads)
-        self.bev_cross_attn = MultiHeadCrossAttention(hidden_size, num_heads)
+        self.bev_cross_attn = MultiHeadCrossAttention(hidden_size, num_heads)  # Keep for BEV
 
         self.norm2 = get_layernorm(
             hidden_size, eps=1e-6, affine=False, use_kernel=enable_layernorm_kernel
@@ -79,17 +79,14 @@ class STDiT3Block(nn.Module):
         t,  # this t
         T=None,  # number of frames
         S=None,  # number of pixel patches
-        NC=None,  # number of cameras
+        NC=None,  # Ignored in unified mode
     ):
-
-        B, N, C = x.shape
-        assert (N == T * S) and (B % NC == 0)
-        b = B // NC
+        B, N, C = x.shape  # N = T*S unified (no NC split)
+        # Drop NC assert – unified treats all as single seq
 
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = repeat(
-            self.scale_shift_table[None] + t.reshape(b, 6, -1),
-            "b ... -> (b NC) ...",
-            NC=NC,
+            self.scale_shift_table[None] + t.reshape(B, 6, -1),  # B, not b= B//NC
+            "b ... -> b ...",  # No NC repeat
         ).chunk(6, dim=1)
 
         x_m = t2i_modulate(self.norm1(x), shift_msa, scale_msa)
@@ -98,9 +95,9 @@ class STDiT3Block(nn.Module):
         # attention
         ######################
 
-        x_m = rearrange(x_m, "(B NC) (T S) C -> (B T) (NC S) C", NC=NC, T=T, S=S)
+        x_m = rearrange(x_m, "b (T S) c -> b T (S c)", T=T, S=S)  # Unified rearrange (no NC)
         x_m = self.attn(x_m)
-        x_m = rearrange(x_m, "(B T) (NC S) C -> (B NC) (T S) C", NC=NC, T=T, S=S)
+        x_m = rearrange(x_m, "b T (S c) -> b (T S) c", T=T, S=S)
 
         # modulate (attention)
         x_m_s = gate_msa * x_m
@@ -111,13 +108,13 @@ class STDiT3Block(nn.Module):
         ######################
         # cross attn
         ######################
-        x_c = self.cross_attn(x, y[:, 0], None)
+        x_c = self.cross_attn(x, y[:, 0], None)  # y[0] = bbox/cam tokens
 
         x = x + x_c
 
         # BEV cross attn
         if y.shape[1] > 1:
-            x_bev = self.bev_cross_attn(x, y[:, 1], None)
+            x_bev = self.bev_cross_attn(x, y[:, 1], None)  # y[1] = BEV tokens
             x = x + x_bev
 
         ######################
@@ -190,7 +187,7 @@ class STDiT3Config(PretrainedConfig):
 
 class STDiT3(PreTrainedModel):
     """
-    Diffusion model with a Transformer backbone.
+    Diffusion model with a Transformer backbone - Unified NC-Free Version.
     """
 
     config_class = STDiT3Config
@@ -227,9 +224,9 @@ class STDiT3(PreTrainedModel):
 
         # base_token, should not be trainable
         self.register_buffer("base_token", torch.randn(self.hidden_size))
-        # init unified control embedder
+        # Unified control embedder
         from .control_embedder import ControlEmbedder
-        self.control_embedder = ControlEmbedder(config)
+        self.control_embedder = ControlEmbedder(config)  # Your hybrid
 
         # base blocks
         drop_path = [x.item() for x in torch.linspace(0, config.drop_path, self.depth)]
@@ -303,35 +300,16 @@ class STDiT3(PreTrainedModel):
         W = W // self.patch_size[2]
         return (T, H, W)
 
-
-
-    def encode_cam(self, cam, embedder, drop_mask):
-        B, T, S = cam.shape[:3]
-        NC = B // drop_mask.shape[0]
-        mask = repeat(drop_mask, "b T -> (b NC T S)", NC=NC, S=S)
-        cam = rearrange(cam, "B T S ... -> (B T S) ...")
-        cam_emb, _ = embedder.embed_cam(cam, mask, T=T, S=S)
-        return cam_emb
-
     def encode_cond_sequence(self, encoder_hidden_states):
-        return encoder_hidden_states, None # Return None for y_lens
+        return encoder_hidden_states, None  # Unified cond tokens, no lens
 
     def forward(self, x, t, encoder_hidden_states=None, **kwargs):
-        drop_cond_mask = None
         """
-        Forward pass
+        Forward pass – NC-Free Unified
         """
         dtype = self.x_embedder.proj.weight.dtype
-        B = x.size(0)
-        if drop_cond_mask is None:  # camera
-            drop_cond_mask = torch.ones((B), device=x.device, dtype=x.dtype)
-
         x = x.to(dtype)
-
-
-
-        x = rearrange(x, "B NC C T ... -> (B NC) C T ...", NC=NC)
-        timestep = timestep.to(dtype)
+        t = t.to(dtype)
 
         # === get pos embed ===
         _, _, Tx, Hx, Wx = x.size()
@@ -339,55 +317,39 @@ class STDiT3(PreTrainedModel):
         S = H * W
 
         base_size = round(S**0.5)
-        resolution_sq = (height[0].item() * width[0].item()) ** 0.5
+        resolution_sq = (Hx * Wx) ** 0.5  # height/width from x, not params
         scale = resolution_sq / self.input_sq_size
         pos_emb = self.pos_embed(x, H, W, scale=scale, base_size=base_size)
 
         # === get timestep embed ===
-        t = self.t_embedder(timestep, dtype=x.dtype)  # [B, C]
-        t_mlp = self.t_block(t)
+        t_emb = self.t_embedder(t)
+        t_mlp = self.t_block(t_emb)
 
         # === get y embed ===
-        y = encoder_hidden_states
+        y = encoder_hidden_states  # ControlEmbedder tokens [B, seq, dim]
 
         # === get x embed ===
-        x_b = self.x_embedder(x)  # [B, N, C]
-        x_b = rearrange(x_b, "B (T S) C -> B T S C", T=T, S=S)
-        x = x_b + pos_emb
-
-        x = rearrange(x, "B T S C -> B (T S) C", T=T, S=S)
+        x_b = self.x_embedder(x)  # [B, N=T*S, C] unified
+        x = x_b + pos_emb  # [B, N, C]
 
         # === blocks ===
-
-        for block_i in range(0, self.depth):
-            x = self.spatial_blocks[block_i](
-                x,
-                y,
-                t_mlp,
-                T,
-                S,
-                NC,
-            )
+        for block_i in range(self.depth):
+            x = self.spatial_blocks[block_i](x, y, t_mlp, T=T, S=S)  # No NC
 
         # === final layer ===
-        x = self.final_layer(
-            x,
-            repeat(t, "b d -> (b NC) d", NC=NC),
-            T=T,
-            S=S,
-        )
-        x = self.unpatchify(x, T, H, W, Tx, Hx, Wx)
+        x = self.final_layer(x, t_mlp, T=T, S=S)  # Drop repeat(t, NC)
+
+        # === unpatchify ===
+        x = self.unpatchify(x, T, H, W, Tx, Hx, Wx)  # No NC rearrange
 
         x = x.to(torch.float32)
-        x = rearrange(x, "(B NC) C T ... -> B NC C T ...", NC=NC)
-        x = torch.cat([x[:, :3], x[:, 4:]], dim=1)
-        x = rearrange(x, "B NC C T ... -> B (C NC) T ...", NC=(NC - 1))
-        return x
+        # No NC cat/rearrange – x [B, C, T, H, W] direct
+        return x  # Or pred_sigma logic if needed
 
     def unpatchify(self, x, N_t, N_h, N_w, R_t, R_h, R_w):
         """
         Args:
-            x (torch.Tensor): of shape [B, N, C]
+            x (torch.Tensor): of shape [B, N, C_out]
 
         Return:
             x (torch.Tensor): of shape [B, C_out, T, H, W]
