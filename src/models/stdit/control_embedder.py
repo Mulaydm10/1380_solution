@@ -92,39 +92,7 @@ class BBoxEmbedder(nn.Module):
         return emb
 
     def forward(self, bboxes, classes, null_mask=None, mask=None, **kwargs):
-        # NEW: Safe squeeze – drop 1s but preserve min 3D [B,T,N]
-        def safe_squeeze(tensor):
-            if tensor is None: return None
-            # Squeeze all 1s
-            while len(tensor.shape) > 3 and 1 in tensor.shape:
-                for i in range(len(tensor.shape)):
-                    if tensor.shape[i] == 1:
-                        tensor = tensor.squeeze(i)
-            # Force 3D if less
-            if len(tensor.shape) == 1:
-                tensor = tensor.unsqueeze(0).unsqueeze(-1)  # [max] -> [1, max, 1]
-            elif len(tensor.shape) == 2:
-                tensor = tensor.unsqueeze(-1)  # [B, max] -> [B, max, 1]
-            return tensor
-        
-        print(f"Pre-squeeze classes: {classes.shape}") # DEBUG
-        bboxes = safe_squeeze(bboxes)
-        classes = safe_squeeze(classes)
-        print(f"Post-squeeze classes: {classes.shape}") # DEBUG
-        
-        if null_mask is not None:
-            null_mask = safe_squeeze(null_mask)
-        if mask is not None:
-            mask = safe_squeeze(mask)
-        
-        # PRINT DEBUG (remove post-fix)
-        print(f"In unpack classes: {classes.shape}")
-        
-        # Original unpack (now guaranteed 3D)
         B, T, N = classes.shape
-        print(f"Unpack success: B={B}, T={T}, N={N}") # DEBUG
-        
-        # Original rearranges
         bboxes = rearrange(bboxes, "b t n ... -> (b t) n ...")
         classes = rearrange(classes, "b t n -> (b t) n")
         if null_mask is not None:
@@ -150,10 +118,12 @@ class BBoxEmbedder(nn.Module):
         pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
         pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
 
+        # class
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
         cls_emb = cls_emb * mask + self.mask_class_feature[None] * (1 - mask)
 
+        # combine
         emb = self.forward_feature(pos_emb, cls_emb)
         emb = rearrange(emb, "(b n) ... -> b n ...", n=N)
         if self.after_proj:
@@ -214,26 +184,24 @@ class ControlEmbedder(nn.Module):
         self.bev_embedder = BEVEmbedder(embed_dim=config.hidden_size)
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
-        # Extract & robust shape for 3D [B,T,N=1]
-        bbox_data = bboxes_dict['bboxes']['data'].squeeze()
-        class_data = bboxes_dict['classes']['data'].squeeze()
-        if len(class_data.shape) == 1:  # Batch=1 over-squeeze to scalar
-            class_data = class_data.unsqueeze(0).unsqueeze(-1)  # [1, max, 1]
-        elif len(class_data.shape) == 2:
-            class_data = class_data.unsqueeze(-1)  # [B, max, 1]
-
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze()
-        if len(attention_mask.shape) == 1:
-            attention_mask = attention_mask.unsqueeze(0).unsqueeze(-1)
-        elif len(attention_mask.shape) == 2:
-            attention_mask = attention_mask.unsqueeze(-1)
+        # Selective squeeze for pad dims (1,2 =1s from pad; keep B=0, T=3)
+        bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(2)  # [1,1,1,50,8,3] -> [1,50,8,3]
+        class_data = bboxes_dict['classes']['data'].squeeze(1).squeeze(2)  # [1,1,1,50] -> [1,50]
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze(1).squeeze(2)  # [1,1,1,50] -> [1,50]
+        
+        print("Post-selective squeeze bbox_data:", bbox_data.shape)  # Debug: [1,50,8,3]
+        print("class_data:", class_data.shape)  # [1,50]
+        
+        # 3D for classes
+        class_data = class_data.unsqueeze(-1)  # [1,50,1]
+        
         attention_mask = attention_mask.float()
-
-        null_mask = 1 - attention_mask.squeeze(-1)  # [B, max]
-        null_mask = null_mask.unsqueeze(-1)  # [B, max, 1]
-
-        # Now call (3D safe)
-        print(f"Pre-call classes shape: {class_data.shape}") # DEBUG
+        attention_mask = attention_mask.unsqueeze(-1)  # [1,50,1]
+        
+        null_mask = 1 - attention_mask.squeeze(-1)  # [1,50]
+        null_mask = null_mask.unsqueeze(-1)  # [1,50,1]
+        
+        # Call
         bbox_tokens = self.bbox_embedder(
             bboxes=bbox_data,
             classes=class_data,
