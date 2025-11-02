@@ -1,10 +1,12 @@
 import logging
+
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
+
 from .utils import zero_module
-import timm
 
 # --- Original Embedders (Restored) ---
 
@@ -249,7 +251,7 @@ class ControlEmbedder(nn.Module):
         )
         
         # Cam stream (original)
-        cam_tokens, _ = self.cam_embedder.embed_cam(camera_params['K'])
+        cam_tokens, _ = self.cam_embedder.embed_cam(camera_params[])
         
         # BEV stream (new; optional)
         if bev_grid is not None:
