@@ -97,6 +97,29 @@ def main():
     state_dict = torch.load(ckpt_path, weights_only=True)
     model.load_state_dict(state_dict, strict=False)
 
+    # --- Grok's Safeguard: Verify Fine-Tuning ---
+    if accelerator.is_main_process:
+        missing_keys, unexpected_keys = [], []
+        for k in state_dict:
+            if k not in model.state_dict():
+                unexpected_keys.append(k)
+        for k in model.state_dict():
+            if k not in state_dict:
+                missing_keys.append(k)
+        
+        print("--- Fine-Tuning Load Report ---")
+        print(f"Loaded Matches: {len(model.state_dict()) - len(missing_keys)} / {len(model.state_dict())}")
+        print(f"Missing Keys (New Layers): {len(missing_keys)}")
+        print(f"Unexpected Keys (Old Layers): {len(unexpected_keys)}")
+        
+        spatial_loaded = all('spatial_blocks' in k for k in model.state_dict() if 'spatial_blocks' in k and k not in missing_keys)
+        print(f"Core Spatial Blocks Preserved: {spatial_loaded}")
+        if not spatial_loaded:
+            raise RuntimeError("Critical Error: Core spatial blocks are not being loaded from checkpoint. Aborting.")
+        print("---------------------------------")
+
+
+
     # Gradient checkpointing not supported for STDiT3, skip to avoid error
     # model.gradient_checkpointing_enable()
 
