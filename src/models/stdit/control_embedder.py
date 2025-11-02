@@ -92,81 +92,79 @@ class BBoxEmbedder(nn.Module):
         return emb
 
     def forward(self, bboxes, classes, null_mask=None, mask=None, **kwargs):
-        print(f"*** BBoxEmbedder Entry: classes.shape = {classes.shape}, bboxes.shape = {bboxes.shape}")
-        
-        # NEW: Defensive reshape for 3D (guard against upstream squeeze overkill)
-        def force_3d(tensor, name=''):
-            if tensor is None: return None
-            print(f"Force 3D for {name}: Pre = {tensor.shape}")
-            tensor = tensor.squeeze()  # Drop all 1s
-            if len(tensor.shape) == 1:
-                tensor = tensor.unsqueeze(0).unsqueeze(-1)  # [max] -> [1, max, 1]
-                print(f"  -> 1D to 3D: [1, {tensor.shape[1]}, 1]")
-            elif len(tensor.shape) == 2:
-                tensor = tensor.unsqueeze(-1)  # [B, max] -> [B, max, 1]
-                print(f"  -> 2D to 3D: [B={tensor.shape[0]}, T={tensor.shape[1]}, N=1]")
-            print(f"  -> Final {name}: {tensor.shape}")
-            return tensor
-        
-        classes = force_3d(classes, 'classes')
-        bboxes = force_3d(bboxes, 'bboxes')
-        null_mask = force_3d(null_mask, 'null_mask')
-        mask = force_3d(mask, 'mask')
-        
-        print(f"*** Pre-Unpack: classes.shape = {classes.shape}")
-        
-        # Original unpack (now safe 3D)
-        B, T, N = classes.shape
-        print(f"*** Unpack Success: B={B}, T={T}, N={N}")
-        
-        # Original rearranges
-        print(f"*** Pre-Rearrange bboxes: {bboxes.shape}")
-        bboxes = rearrange(bboxes, "b t n ... -> (b t) n ...")
-        print(f"*** Post-Rearrange bboxes: {bboxes.shape}")
-        
+        print(f"--- BBoxEmbedder.forward START ---")
+        print(f"Initial shapes: bboxes={bboxes.shape}, classes={classes.shape}, null_mask={null_mask.shape if null_mask is not None else None}")
+
+        # Unpack (original)
+        B, T, N_cls = classes.shape  # B=1, T=50, N_cls=1
+        print(f"Unpack Success: B={B}, T={T}, N_cls={N_cls}")
+
+        # Rearrange inputs
+        bboxes = rearrange(bboxes, "b t ... -> (b t) ...")
         classes = rearrange(classes, "b t n -> (b t) n")
-        print(f"*** Post-Rearrange classes: {classes.shape}")
-        
+        print(f"Post-rearrange: bboxes={bboxes.shape}, classes={classes.shape}")
+
         if null_mask is not None:
             null_mask = rearrange(null_mask, "b t n -> (b t) n")
-            print(f"*** Post-Rearrange null_mask: {null_mask.shape}")
-            null_mask = repeat(null_mask, 'bt n -> (bt N) n', N=8)  # Repeat for each corner
-            print(f"*** Expanded null_mask: {null_mask.shape}")
+            print(f"Post-rearrange: null_mask={null_mask.shape}")
         if mask is not None:
             mask = rearrange(mask, "b t n -> (b t) n")
-            print(f"*** Post-Rearrange mask: {mask.shape}")
-            mask = repeat(mask, 'bt n -> (bt N) n', N=8)  # Repeat for each corner
-            print(f"*** Expanded mask: {mask.shape}")
-        
-        def handle_none_mask(_mask):
-            if _mask is None:
-                _mask = torch.ones(len(bboxes), device=bboxes.device)
-            else:
-                _mask = _mask.flatten()
-            _mask = _mask.unsqueeze(-1).type_as(self.null_pos_feature)
-            return _mask
+            print(f"Post-rearrange: mask={mask.shape}")
 
-        mask = handle_none_mask(mask)
-        null_mask = handle_none_mask(null_mask)
-
-        # box
+        # --- Fourier Embedding (Per-Corner) ---
         pos_emb = self.fourier_embedder(bboxes)
-        pos_emb = pos_emb.reshape(pos_emb.shape[0], -1).type_as(self.null_pos_feature)
-        print(f"*** Pre-Multiply pos_emb: {pos_emb.shape}, null_mask: {null_mask.shape}")
+        print(f"Post-fourier_embedder: pos_emb={pos_emb.shape}")
 
+        # --- CRITICAL FIX: Group per-corner embeddings to per-object ---
+        corners_per_obj = bboxes.size(1) # Should be 8
+        print(f"Grouping {corners_per_obj} corners per object")
+        pos_emb = pos_emb.view(B * T, -1)  # Reshape [50, 8, 27] -> [50, 216]
+        print(f"Post-grouping (per-object): pos_emb={pos_emb.shape}")
+
+        # --- Mask Handling ---
+        def handle_none_mask_local(_mask, name=''):
+            if _mask is None:
+                # Create a default mask of all ones if none is provided
+                _mask = torch.ones(B * T, 1, device=pos_emb.device)
+                print(f"handle_none_mask_local({name}): created default mask with shape {_mask.shape}")
+            else:
+                # Ensure mask is [B*T, 1]
+                _mask = _mask.view(B * T, -1).float()
+                if _mask.size(-1) > 1:
+                    _mask = _mask.mean(dim=-1, keepdim=True)
+                print(f"handle_none_mask_local({name}): processed mask to shape {_mask.shape}")
+            return _mask.type_as(self.null_pos_feature)
+
+        mask = handle_none_mask_local(mask, 'mask')
+        null_mask = handle_none_mask_local(null_mask, 'null_mask')
+
+        # --- Final Masking and Combination ---
+        print(f"Pre-Multiply Shapes: pos_emb={pos_emb.shape}, null_mask={null_mask.shape}, null_pos_feature[None]={self.null_pos_feature[None].shape}")
+        
+        # Multiply (now broadcast-safe)
         pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
         pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
-        print(f"*** Post-Multiply pos_emb: {pos_emb.shape}")
+        print(f"Post-multiply: pos_emb={pos_emb.shape}")
 
+        # Class embedding
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
         cls_emb = cls_emb * mask + self.mask_class_feature[None] * (1 - mask)
+        print(f"Post-class_embed: cls_emb={cls_emb.shape}")
 
+        # Combine
         emb = self.forward_feature(pos_emb, cls_emb)
-        emb = rearrange(emb, "(b n) ... -> b n ...", n=N)
+        print(f"Post-forward_feature: emb={emb.shape}")
+
+        # Rearrange back to sequence
+        emb = rearrange(emb, "(b t) d -> b t d", b=B, t=T)
+        print(f"Final rearrange: emb={emb.shape}")
+
         if self.after_proj:
             emb = self.after_proj(emb)
-        emb = rearrange(emb, "(b t) n d -> b t n d", t=T)
+            print(f"Post-after_proj: emb={emb.shape}")
+
+        print(f"--- BBoxEmbedder.forward END ---")
         return emb
 
 class CamEmbedder(nn.Module):
