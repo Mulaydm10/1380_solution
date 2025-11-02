@@ -322,7 +322,7 @@ class STDiT3(PreTrainedModel):
         pos_emb = self.pos_embed(x, H, W, scale=scale, base_size=base_size)
 
         # === get timestep embed ===
-        t_emb = self.t_embedder(t)
+        t_emb = self.t_embedder(t, dtype=x.dtype)
         t_mlp = self.t_block(t_emb)
 
         # === get y embed ===
