@@ -128,11 +128,11 @@ class BBoxEmbedder(nn.Module):
         def handle_none_mask_local(_mask, name=''):
             if _mask is None:
                 # Create a default mask of all ones if none is provided
-                _mask = torch.ones(B * T, 1, device=pos_emb.device)
+                _mask = torch.ones(B * N_objs, 1, device=pos_emb.device)
                 print(f"handle_none_mask_local({name}): created default mask with shape {_mask.shape}")
             else:
                 # Ensure mask is [B*T, 1]
-                _mask = _mask.view(B * T, -1).float()
+                _mask = _mask.view(B * N_objs, -1).float()
                 if _mask.size(-1) > 1:
                     _mask = _mask.mean(dim=-1, keepdim=True)
                 print(f"handle_none_mask_local({name}): processed mask to shape {_mask.shape}")
