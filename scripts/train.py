@@ -272,15 +272,7 @@ def main():
                 torch.cuda.empty_cache()
                 gc.collect()
                 torch.cuda.synchronize()
-                del (
-                    x,
-                    cond_cam,
-                    clean_cond_latents,
-                    clean_gt_latent,
-                    predicted_noise,
-                    target_pred,
-                    noise,
-                )
+                del predicted_noise, noise
 
             # Logging
             if accelerator.sync_gradients:
