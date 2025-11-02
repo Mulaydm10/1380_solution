@@ -111,7 +111,7 @@ class STDiT3Block(nn.Module):
         ######################
         # cross attn
         ######################
-        x_c = self.cross_attn(x, y[:, 0], None)  # y[0] = bbox/cam tokens
+        x_c = self.cross_attn(x, y[:, 0:1], None)  # y[0] = bbox/cam tokens
 
         x = x + x_c
 
