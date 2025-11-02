@@ -203,7 +203,7 @@ class BEVEmbedder(nn.Module):
     def __init__(self, embed_dim=1152):
         super().__init__()
         self.cnn = timm.create_model('efficientnet_b0', pretrained=False, num_classes=0, features_only=True)
-        self.proj = nn.Linear(1280, embed_dim)
+        self.proj = nn.Linear(320, embed_dim)
 
     def forward(self, bev_grid):
         features = self.cnn(bev_grid[:, :3, :, :])[-1]
