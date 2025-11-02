@@ -97,10 +97,10 @@ class STDiT3Block(nn.Module):
         # attention
         ######################
 
-        x_m = rearrange(x_m, "b (T S) c -> b T (S c)", T=T, S=S)  # Unified rearrange (no NC)
-        print(f"[STDiT3Block.forward] Shape of x_m after rearrange for attention: {x_m.shape}")
-        x_m = self.attn(x_m)
-        x_m = rearrange(x_m, "b T (S c) -> b (T S) c", T=T, S=S)
+        print(f"[STDiT3Block.forward] Attn input shape: {x_m.shape}")
+        attn_output = self.attn(x_m)
+        print(f"[STDiT3Block.forward] Attn output shape: {attn_output.shape}")
+        x_m = attn_output
 
         # modulate (attention)
         x_m_s = gate_msa * x_m
