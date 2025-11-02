@@ -230,8 +230,8 @@ class ControlEmbedder(nn.Module):
         null_mask = 1 - attention_mask  # [B, max]
 
         # Unsqueeze to 3D for "b t n" (n=1 dummy)
-        attention_mask = attention_mask.unsqueeze(-1)  # [B, max,1]
-        null_mask = null_mask.unsqueeze(-1)  # [B, max,1]
+        attention_mask = attention_mask.unsqueeze(0).unsqueeze(-1)  # [B, max, 1]
+        null_mask = null_mask.unsqueeze(0).unsqueeze(-1)  # [B, max, 1]
         print(f"Debug: Final attention_mask shape for BBoxEmbedder: {attention_mask.shape}")
         print(f"Debug: Final null_mask shape for BBoxEmbedder: {null_mask.shape}")
 
