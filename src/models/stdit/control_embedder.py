@@ -92,13 +92,48 @@ class BBoxEmbedder(nn.Module):
         return emb
 
     def forward(self, bboxes, classes, null_mask=None, mask=None, **kwargs):
+        print(f"*** BBoxEmbedder Entry: classes.shape = {classes.shape}, bboxes.shape = {bboxes.shape}")
+        
+        # NEW: Defensive reshape for 3D (guard against upstream squeeze overkill)
+        def force_3d(tensor, name=''):
+            if tensor is None: return None
+            print(f"Force 3D for {name}: Pre = {tensor.shape}")
+            tensor = tensor.squeeze()  # Drop all 1s
+            if len(tensor.shape) == 1:
+                tensor = tensor.unsqueeze(0).unsqueeze(-1)  # [max] -> [1, max, 1]
+                print(f"  -> 1D to 3D: [1, {tensor.shape[1]}, 1]")
+            elif len(tensor.shape) == 2:
+                tensor = tensor.unsqueeze(-1)  # [B, max] -> [B, max, 1]
+                print(f"  -> 2D to 3D: [B={tensor.shape[0]}, T={tensor.shape[1]}, N=1]")
+            print(f"  -> Final {name}: {tensor.shape}")
+            return tensor
+        
+        classes = force_3d(classes, 'classes')
+        bboxes = force_3d(bboxes, 'bboxes')
+        null_mask = force_3d(null_mask, 'null_mask')
+        mask = force_3d(mask, 'mask')
+        
+        print(f"*** Pre-Unpack: classes.shape = {classes.shape}")
+        
+        # Original unpack (now safe 3D)
         B, T, N = classes.shape
+        print(f"*** Unpack Success: B={B}, T={T}, N={N}")
+        
+        # Original rearranges
+        print(f"*** Pre-Rearrange bboxes: {bboxes.shape}")
         bboxes = rearrange(bboxes, "b t n ... -> (b t) n ...")
+        print(f"*** Post-Rearrange bboxes: {bboxes.shape}")
+        
         classes = rearrange(classes, "b t n -> (b t) n")
+        print(f"*** Post-Rearrange classes: {classes.shape}")
+        
         if null_mask is not None:
             null_mask = rearrange(null_mask, "b t n -> (b t) n")
+            print(f"*** Post-Rearrange null_mask: {null_mask.shape}")
+        
         if mask is not None:
             mask = rearrange(mask, "b t n -> (b t) n")
+            print(f"*** Post-Rearrange mask: {mask.shape}")
         
         def handle_none_mask(_mask):
             if _mask is None:
@@ -113,17 +148,17 @@ class BBoxEmbedder(nn.Module):
 
         # box
         pos_emb = self.fourier_embedder(bboxes)
-
         pos_emb = pos_emb.reshape(pos_emb.shape[0], -1).type_as(self.null_pos_feature)
+        print(f"*** Pre-Multiply pos_emb: {pos_emb.shape}, null_mask: {null_mask.shape}")
+
         pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
         pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
+        print(f"*** Post-Multiply pos_emb: {pos_emb.shape}")
 
-        # class
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
         cls_emb = cls_emb * mask + self.mask_class_feature[None] * (1 - mask)
 
-        # combine
         emb = self.forward_feature(pos_emb, cls_emb)
         emb = rearrange(emb, "(b n) ... -> b n ...", n=N)
         if self.after_proj:
