@@ -120,7 +120,8 @@ class BBoxEmbedder(nn.Module):
         # --- CRITICAL FIX: Group per-corner embeddings to per-object ---
         corners_per_obj = bboxes.size(1) # Should be 8
         print(f"Grouping {corners_per_obj} corners per object")
-        pos_emb = pos_emb.view(B * T, -1)  # Reshape [50, 8, 27] -> [50, 216]
+        print(f"[BBoxEmbedder] Reshaping pos_emb from {pos_emb.shape} to [{B * N_objs}, -1]")
+        pos_emb = pos_emb.view(B * N_objs, -1)  # Reshape [N_objs, 8, 27] -> [N_objs, 216]
         print(f"Post-grouping (per-object): pos_emb={pos_emb.shape}")
 
         # --- Mask Handling ---
