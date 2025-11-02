@@ -10,6 +10,7 @@ from .utils import zero_module
 
 # --- Original Embedders (Restored) ---
 
+
 class FourierEmbedder:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -38,6 +39,7 @@ class FourierEmbedder:
     def __call__(self, inputs):
         return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
 
+
 def get_embedder(input_dims, num_freqs, include_input=True, log_sampling=True):
     embed_kwargs = {
         "input_dims": input_dims,
@@ -51,10 +53,20 @@ def get_embedder(input_dims, num_freqs, include_input=True, log_sampling=True):
     logging.debug(f"embedder out dim = {embedder_obj.out_dim}")
     return embedder_obj
 
+
 class BBoxEmbedder(nn.Module):
     def __init__(
         self,
-        classes=["car", "truck", "bus", "utility", "person", "child", "obstacle", "traffic sign"],
+        classes=[
+            "car",
+            "truck",
+            "bus",
+            "utility",
+            "person",
+            "child",
+            "obstacle",
+            "traffic sign",
+        ],
         class_token_dim=768,
         embedder_num_freq=4,
         proj_dims=[768, 512, 512, 768],
@@ -67,7 +79,9 @@ class BBoxEmbedder(nn.Module):
         input_dims = 3
         output_num = 8
         self.fourier_embedder = get_embedder(input_dims, embedder_num_freq)
-        self.bbox_proj = nn.Linear(self.fourier_embedder.out_dim * output_num, proj_dims[0])
+        self.bbox_proj = nn.Linear(
+            self.fourier_embedder.out_dim * output_num, proj_dims[0]
+        )
         self.second_linear = nn.Sequential(
             nn.Linear(proj_dims[0] + class_token_dim, proj_dims[1]),
             nn.SiLU(),
@@ -78,9 +92,13 @@ class BBoxEmbedder(nn.Module):
         class_tokens = torch.randn(n_classes, class_token_dim)
         self.register_parameter("_class_tokens", nn.Parameter(class_tokens))
         self.null_class_feature = torch.nn.Parameter(torch.zeros([class_token_dim]))
-        self.null_pos_feature = torch.nn.Parameter(torch.zeros([self.fourier_embedder.out_dim * output_num]))
+        self.null_pos_feature = torch.nn.Parameter(
+            torch.zeros([self.fourier_embedder.out_dim * output_num])
+        )
         self.mask_class_feature = torch.nn.Parameter(torch.zeros([class_token_dim]))
-        self.mask_pos_feature = torch.nn.Parameter(torch.zeros([self.fourier_embedder.out_dim * output_num]))
+        self.mask_pos_feature = torch.nn.Parameter(
+            torch.zeros([self.fourier_embedder.out_dim * output_num])
+        )
         if after_proj:
             self.after_proj = zero_module(nn.Linear(proj_dims[-1], proj_dims[-1]))
         else:
@@ -95,83 +113,82 @@ class BBoxEmbedder(nn.Module):
 
     def forward(self, bboxes, classes, null_mask=None, mask=None, **kwargs):
         print(f"--- BBoxEmbedder.forward START ---")
-        print(f"Initial shapes: bboxes={bboxes.shape}, classes={classes.shape}, null_mask={null_mask.shape if null_mask is not None else None}")
 
         # The input is now 2D/3D, no time dimension to unpack
         B, N_objs = classes.shape
-        print(f"Unpack Success: B={B}, N_objs={N_objs}")
 
         # Rearrange inputs
         bboxes = rearrange(bboxes, "b n ... -> (b n) ...")
         classes = rearrange(classes, "b n -> (b n)")
-        print(f"Post-rearrange: bboxes={bboxes.shape}, classes={classes.shape}")
 
         if null_mask is not None:
             null_mask = rearrange(null_mask, "b n -> (b n)")
-            print(f"Post-rearrange: null_mask={null_mask.shape}")
+
         if mask is not None:
             mask = rearrange(mask, "b n -> (b n)")
-            print(f"Post-rearrange: mask={mask.shape}")
 
         # --- Fourier Embedding (Per-Corner) ---
         pos_emb = self.fourier_embedder(bboxes)
-        print(f"Post-fourier_embedder: pos_emb={pos_emb.shape}")
 
         # --- CRITICAL FIX: Group per-corner embeddings to per-object ---
-        corners_per_obj = bboxes.size(1) # Should be 8
-        print(f"Grouping {corners_per_obj} corners per object")
-        print(f"[BBoxEmbedder] Reshaping pos_emb from {pos_emb.shape} to [{B * N_objs}, -1]")
-        pos_emb = pos_emb.view(B * N_objs, -1)  # Reshape [N_objs, 8, 27] -> [N_objs, 216]
-        print(f"Post-grouping (per-object): pos_emb={pos_emb.shape}")
+        corners_per_obj = bboxes.size(1)  # Should be 8
+
+        pos_emb = pos_emb.view(
+            B * N_objs, -1
+        )  # Reshape [N_objs, 8, 27] -> [N_objs, 216]
 
         # --- Mask Handling ---
-        def handle_none_mask_local(_mask, name=''):
+        def handle_none_mask_local(_mask, name=""):
             if _mask is None:
                 # Create a default mask of all ones if none is provided
                 _mask = torch.ones(B * N_objs, 1, device=pos_emb.device)
-                print(f"handle_none_mask_local({name}): created default mask with shape {_mask.shape}")
+
             else:
                 # Ensure mask is [B*T, 1]
                 _mask = _mask.view(B * N_objs, -1).float()
                 if _mask.size(-1) > 1:
                     _mask = _mask.mean(dim=-1, keepdim=True)
-                print(f"handle_none_mask_local({name}): processed mask to shape {_mask.shape}")
+
             return _mask.type_as(self.null_pos_feature)
 
-        mask = handle_none_mask_local(mask, 'mask')
-        null_mask = handle_none_mask_local(null_mask, 'null_mask')
+        mask = handle_none_mask_local(mask, "mask")
+        null_mask = handle_none_mask_local(null_mask, "null_mask")
 
         # --- Final Masking and Combination ---
-        print(f"Pre-Multiply Shapes: pos_emb={pos_emb.shape}, null_mask={null_mask.shape}, null_pos_feature[None]={self.null_pos_feature[None].shape}")
-        
+
         # Multiply (now broadcast-safe)
         pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
         pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
-        print(f"Post-multiply: pos_emb={pos_emb.shape}")
 
         # Class embedding
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
         cls_emb = cls_emb * mask + self.mask_class_feature[None] * (1 - mask)
-        print(f"Post-class_embed: cls_emb={cls_emb.shape}")
 
         # Combine
         emb = self.forward_feature(pos_emb, cls_emb)
-        print(f"Post-forward_feature: emb={emb.shape}")
 
         # Rearrange back to sequence
         emb = rearrange(emb, "(b t) d -> b t d", b=B, t=N_objs)
-        print(f"Final rearrange: emb={emb.shape}")
 
         if self.after_proj:
             emb = self.after_proj(emb)
-            print(f"Post-after_proj: emb={emb.shape}")
 
         print(f"--- BBoxEmbedder.forward END ---")
         return emb
 
+
 class CamEmbedder(nn.Module):
-    def __init__(self, input_dim, out_dim, num=7, num_freqs=4, include_input=True, log_sampling=True, after_proj=False):
+    def __init__(
+        self,
+        input_dim,
+        out_dim,
+        num=7,
+        num_freqs=4,
+        include_input=True,
+        log_sampling=True,
+        after_proj=False,
+    ):
         super().__init__()
         self.embedder = get_embedder(input_dim, num_freqs, include_input, log_sampling)
         self.emb2token = nn.Linear(self.embedder.out_dim * num, out_dim)
@@ -198,12 +215,16 @@ class CamEmbedder(nn.Module):
     def forward(self, *args, **kwargs):
         raise NotImplementedError("Please call other functions.")
 
+
 # --- New BEV Embedder ---
+
 
 class BEVEmbedder(nn.Module):
     def __init__(self, embed_dim=1152):
         super().__init__()
-        self.cnn = timm.create_model('efficientnet_b0', pretrained=False, num_classes=0, features_only=True)
+        self.cnn = timm.create_model(
+            "efficientnet_b0", pretrained=False, num_classes=0, features_only=True
+        )
         self.proj = nn.Linear(320, embed_dim)
 
     def forward(self, bev_grid):
@@ -212,13 +233,24 @@ class BEVEmbedder(nn.Module):
         tokens = self.proj(features)
         return tokens
 
+
 # --- New Unified Control Embedder ---
+
 
 class ControlEmbedder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.bbox_embedder = BBoxEmbedder(**config.bbox_embedder_param)
-        cam_params = getattr(config, 'cam_embedder_param', {'input_dim': 3, 'out_dim': config.hidden_size, 'num': 7, 'after_proj': True})
+        cam_params = getattr(
+            config,
+            "cam_embedder_param",
+            {
+                "input_dim": 3,
+                "out_dim": config.hidden_size,
+                "num": 7,
+                "after_proj": True,
+            },
+        )
         self.cam_embedder = CamEmbedder(**cam_params)
         self.bev_embedder = BEVEmbedder(embed_dim=config.hidden_size)
 
@@ -227,16 +259,15 @@ class ControlEmbedder(nn.Module):
 
         # Unpack the dictionary of tensors
         print(f"[ControlEmbedder] Unpacking bboxes_dict. Keys: {bboxes_dict.keys()}")
-        bbox_data = bboxes_dict['bboxes'].squeeze(1).squeeze(1)  # [B, max_objs,8,3]
-        class_data = bboxes_dict['classes'].squeeze(1).squeeze(1).long()  # [B, max_objs] – MUST be long for indexing
-        print(f"[ControlEmbedder] Converted class_data to long. New dtype: {class_data.dtype}")
-        attention_mask = bboxes_dict['masks'].squeeze(1).squeeze(1).any(dim=0).float() # Use the mask from the bboxes
-        null_mask = 1 - attention_mask
+        bbox_data = bboxes_dict["bboxes"].squeeze(1).squeeze(1)  # [B, max_objs,8,3]
+        class_data = (
+            bboxes_dict["classes"].squeeze(1).squeeze(1).long()
+        )  # [B, max_objs] – MUST be long for indexing
 
-        print(f"[ControlEmbedder] Shapes to BBoxEmbedder:")
-        print(f"  - bboxes: {bbox_data.shape}, type: {bbox_data.dtype}")
-        print(f"  - classes: {class_data.shape}, type: {class_data.dtype}")
-        print(f"  - mask: {attention_mask.shape}, type: {attention_mask.dtype}")
+        attention_mask = (
+            bboxes_dict["masks"].squeeze(1).squeeze(1).any(dim=0).float()
+        )  # Use the mask from the bboxes
+        null_mask = 1 - attention_mask
 
         # Call BBoxEmbedder (now fed properly)
         bbox_tokens = self.bbox_embedder(
@@ -244,31 +275,32 @@ class ControlEmbedder(nn.Module):
             classes=class_data,
             mask=attention_mask,
             null_mask=null_mask,
-            **kwargs
+            **kwargs,
         )
-        
+
         # Cam stream (original)
         # === CAM EMBEDDING – FINAL, LOCKED ===
         print(f"--- Camera Embedding START ---")
-        print(f"camera_params type: {type(camera_params)}, shape: {camera_params.shape}")
-        cam_tensor_raw = camera_params
-        print(f"Initial cam_tensor_raw shape: {cam_tensor_raw.shape}")
-        
-        cam_tensor = cam_tensor_raw.squeeze(1) # [1,1,6,3,7] -> [1,6,3,7]
-        print(f"Squeezed cam_tensor shape: {cam_tensor.shape}")
 
-        K = cam_tensor[:, 0, :, :] # [1,3,7]
-        print(f"Final K shape for embedder: {K.shape}")
+        cam_tensor_raw = camera_params
+
+        cam_tensor = cam_tensor_raw.squeeze(1)  # [1,1,6,3,7] -> [1,6,3,7]
+
+
+        K = cam_tensor[:, 0, :, :]  # [1,3,7]
+
 
         cam_tokens, _ = self.cam_embedder.embed_cam(K)
-        print(f"cam_tokens shape: {cam_tokens.shape}")
+
         print(f"--- Camera Embedding END ---")
-        
+
         # BEV stream (new; optional)
         if bev_grid is not None:
             bev_tokens = self.bev_embedder(bev_grid)
-            all_tokens = torch.cat([bbox_tokens, cam_tokens.unsqueeze(1), bev_tokens], dim=1)
+            all_tokens = torch.cat(
+                [bbox_tokens, cam_tokens.unsqueeze(1), bev_tokens], dim=1
+            )
         else:
             all_tokens = torch.cat([bbox_tokens, cam_tokens.unsqueeze(1)], dim=1)
-        
+
         return all_tokens
