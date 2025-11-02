@@ -95,7 +95,7 @@ from src.registry import MODELS, SCHEDULERS, build_module
 # --- Training Configuration (can be moved to config.py later) ---
 class TrainingConfig:
     num_epochs = 10
-    batch_size = 1  # Keep at 1 for now due to VRAM constraints
+    batch_size = 2  # Keep at 1 for now due to VRAM constraints
     gradient_accumulation_steps = 1  # Reduced to 1 to minimize memory
     learning_rate = 1e-5
     lr_warmup_steps = 500
@@ -290,6 +290,20 @@ def main():
             accelerator.save_state(
                 os.path.join(training_config.output_dir, f"epoch_{epoch}")
             )
+
+            # --- Rolling Checkpoint Management ---
+            checkpoint_dirs = sorted(
+                [d for d in os.listdir(training_config.output_dir) if d.startswith("epoch_")],
+                key=lambda x: int(x.split('_')[-1])
+            )
+            max_checkpoints = 2 # Keep the 2 most recent checkpoints
+            if len(checkpoint_dirs) > max_checkpoints:
+                dir_to_delete = os.path.join(training_config.output_dir, checkpoint_dirs[0])
+                print(f"[Checkpoint Manager] Deleting oldest checkpoint to save space: {dir_to_delete}")
+                # Use shutil.rmtree for safely deleting directories
+                import shutil
+                shutil.rmtree(dir_to_delete)
+
 
 
 if __name__ == "__main__":
