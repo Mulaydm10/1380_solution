@@ -152,13 +152,13 @@ def main():
 
                 with torch.no_grad():
                     vae.to(accelerator.device)
-                    gt_video_for_latent = batch['images_gt'][:, 0:1, :, :, :].permute(0, 2, 1, 3, 4)
-                    gt_latents = vae.encode(gt_video_for_latent)
+                    # Use all 5 views, not just the first one
+                    gt_latents = vae.encode(batch['images_gt'].permute(0, 2, 1, 3, 4)) 
                     vae.to("cpu")
 
-                # RFLOW noise schedule
+                # RFLOW noise schedule - applied to all 5 views
                 t = torch.rand(gt_latents.shape[0], device=accelerator.device).view(-1, 1, 1, 1, 1)
-                noise = torch.randn_like(gt_latents)
+                noise = torch.randn_like(gt_latents) # Noise is now [B, 5, C, H, W]
                 noisy_latents = (1 - t) * gt_latents + t * noise
                 timesteps = t.squeeze(-1).squeeze(-1).squeeze(-1)
 
