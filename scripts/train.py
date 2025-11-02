@@ -175,8 +175,23 @@ def main():
 
                 with torch.no_grad():
                     vae.to(accelerator.device)
-                    # Use all 5 views, not just the first one
-                    gt_latents = vae.encode(batch['images_gt'].permute(0, 2, 1, 3, 4)) 
+                    # The VAE can only encode one view at a time. We must loop through the 5 views.
+                    # Original shape: [B, 5, C, H, W]
+                    images_gt = batch['images_gt']
+                    if accelerator.is_main_process:
+                        print(f"[VAE Encode] Input images_gt shape: {images_gt.shape}")
+
+                    latents_list = []
+                    for i in range(images_gt.size(1)): # Loop through the 5 views
+                        view = images_gt[:, i:i+1, :, :, :] # Get one view: [B, 1, C, H, W]
+                        view_permed = view.permute(0, 2, 1, 3, 4) # Permute to [B, C, 1, H, W]
+                        latent_view = vae.encode(view_permed)
+                        latents_list.append(latent_view)
+                    
+                    gt_latents = torch.cat(latents_list, dim=1) # Stack along the view dimension: [B, 5, C_latent, H_latent, W_latent]
+                    if accelerator.is_main_process:
+                        print(f"[VAE Encode] Output gt_latents shape: {gt_latents.shape}")
+
                     vae.to("cpu")
 
                 # RFLOW noise schedule - applied to all 5 views
