@@ -346,8 +346,9 @@ class STDiT3(PreTrainedModel):
             x = self.spatial_blocks[block_i](x, y, t_mlp, T=T, S=S)  # No NC
 
         # === final layer ===
-        print(f"[STDiT3.forward] t_emb shape for final_layer: {t_emb.shape}")
-        x = self.final_layer(x, t_emb, T=T, S=S)
+        t_emb_2d = t_emb.squeeze(1) # Shape [1, 1, 1152] -> [1, 1152]
+        print(f"[STDiT3.forward] Squeezed t_emb_2d shape for final_layer: {t_emb_2d.shape}")
+        x = self.final_layer(x, t_emb_2d, T=T, S=S)
 
         # === unpatchify ===
         x = self.unpatchify(x, T, H, W, Tx, Hx, Wx)  # No NC rearrange
