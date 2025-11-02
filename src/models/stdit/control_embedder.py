@@ -223,25 +223,22 @@ class ControlEmbedder(nn.Module):
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
         print(f"--- ControlEmbedder.forward START ---")
-        # Bbox data
-        bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(2)
-        print(f"Initial bbox_data shape: {bbox_data.shape}")
+        # Bbox data processing
+        print(f"[ControlEmbedder] bboxes_dict type: {type(bboxes_dict)}")
+        print(f"[ControlEmbedder] bboxes_dict['bboxes'] keys: {bboxes_dict['bboxes'].keys()}")
 
-        # Class data: Squeeze, cast to long for index (class IDs)
-        class_data = bboxes_dict['classes']['data'].squeeze().long()  # [B,1,1,max] -> [max] long (integral IDs)
-        print(f"Squeezed class_data shape: {class_data.shape}")
-        class_data = class_data.unsqueeze(0).unsqueeze(-1)  # [1, max,1] long
-        print(f"Final class_data shape for BBoxEmbedder: {class_data.shape}")
-
-        # Attention/null mask: Similar squeeze + rebuild to [1, max,1]
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().any(dim=[-1,-2]).float()  # Per-obj aggregate [max]
-        print(f"Aggregated attention_mask shape: {attention_mask.shape}")
-        attention_mask = attention_mask.unsqueeze(0).unsqueeze(-1)  # [1, max,1]
+        bbox_data = bboxes_dict['bboxes']['data']
+        class_data = bboxes_dict['bboxes']['mask'] # This is misnamed in the source, it holds class data
+        attention_mask = bboxes_dict['bboxes']['mask']
         null_mask = 1 - attention_mask
-        print(f"Final attention_mask shape for BBoxEmbedder: {attention_mask.shape}")
-        print(f"Final null_mask shape for BBoxEmbedder: {null_mask.shape}")
 
-        # Call (shapes now unpack-ready)
+        print(f"[ControlEmbedder] Shapes passed to BBoxEmbedder:")
+        print(f"  - bboxes: {bbox_data.shape}, type: {bbox_data.dtype}")
+        print(f"  - classes: {class_data.shape}, type: {class_data.dtype}")
+        print(f"  - mask: {attention_mask.shape}, type: {attention_mask.dtype}")
+        print(f"  - null_mask: {null_mask.shape}, type: {null_mask.dtype}")
+
+        # Call BBoxEmbedder
         bbox_tokens = self.bbox_embedder(
             bboxes=bbox_data,
             classes=class_data,
