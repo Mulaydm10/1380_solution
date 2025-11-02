@@ -251,8 +251,8 @@ class ControlEmbedder(nn.Module):
         )
         
         # Cam stream (original)
-        # Extract the intrinsics from the concatenated camera_param tensor
-        K = camera_params[:, :, :4] # Assuming intrinsics are the first 4 columns
+        # Extract the 3x3 intrinsics matrix for the first camera
+        K = camera_params[:, 0, :, :3] # Select first camera, first 3 columns
 
         # Call original
         cam_tokens, _ = self.cam_embedder.embed_cam(K)
