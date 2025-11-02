@@ -3,7 +3,7 @@ global_layernorm = True
 global_xformers = False
 micro_frame_size = None
 
-vae_out_channels = 16
+vae_out_channels = 80
 
 model = dict(
     type="STDiT3-XL/2",
