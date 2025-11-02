@@ -250,8 +250,8 @@ class ControlEmbedder(nn.Module):
         # Cam stream (original)
         # === CAM EMBEDDING – FINAL, LOCKED ===
         print(f"--- Camera Embedding START ---")
-        print(f"camera_params type: {type(camera_params)}")
-        cam_tensor_raw = camera_params['data']
+        print(f"camera_params type: {type(camera_params)}, shape: {camera_params.shape}")
+        cam_tensor_raw = camera_params
         print(f"Initial cam_tensor_raw shape: {cam_tensor_raw.shape}")
         
         cam_tensor = cam_tensor_raw.squeeze(1) # [1,1,6,3,7] -> [1,6,3,7]
