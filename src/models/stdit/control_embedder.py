@@ -251,7 +251,23 @@ class ControlEmbedder(nn.Module):
         )
         
         # Cam stream (original)
-        cam_tokens, _ = self.cam_embedder.embed_cam(camera_params[])
+        # Remap camera_params dict to original expect (e.g., 'K' = intrinsics matrix)
+        cam_data = camera_params.get('K', camera_params.get('pinhole_intrinsics', camera_params.get('intrinsics', None)))  # Fallback chain
+        if cam_data is None:
+            raise KeyError("No 'K' or 'intrinsics' in camera_params – Check dataset.py load")
+        
+        # If flat dict, extract to expected (e.g., focal, principal to matrix)
+        if isinstance(cam_data, dict):
+            K = torch.tensor([
+                [cam_data['fx'], 0, cam_data['cx']],
+                [0, cam_data['fy'], cam_data['cy']],
+                [0, 0, 1]
+            ], device=bbox_tokens.device)  # [3,3] matrix
+        else:
+            K = cam_data  # Assume tensor
+
+        # Call original
+        cam_tokens, _ = self.cam_embedder.embed_cam(K)
         
         # BEV stream (new; optional)
         if bev_grid is not None:
