@@ -108,7 +108,10 @@ class BBoxEmbedder(nn.Module):
             if len(mask.shape) == 2:
                 mask = mask.unsqueeze(-1)  # [B, max, 1]
         
-        # Original unpack (now safe)
+        # PRINT DEBUG (remove post-fix)
+        print(f"In unpack classes: {classes.shape}")
+    
+        # Original unpack (now guaranteed 3D)
         B, T, N = classes.shape
         
         # Original rearranges
@@ -228,6 +231,7 @@ class ControlEmbedder(nn.Module):
         null_mask = null_mask.unsqueeze(-1)  # [B, max, 1]
 
         # Now call (3D safe)
+        print(f"Pre-call classes shape: {class_data.shape}") # DEBUG
         bbox_tokens = self.bbox_embedder(
             bboxes=bbox_data,
             classes=class_data,
