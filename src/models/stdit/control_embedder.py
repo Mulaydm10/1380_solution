@@ -92,29 +92,37 @@ class BBoxEmbedder(nn.Module):
         return emb
 
     def forward(self, bboxes, classes, null_mask=None, mask=None, **kwargs):
+        # NEW: Safe squeeze – drop 1s but preserve min 3D [B,T,N]
+        def safe_squeeze(tensor):
+            if tensor is None: return None
+            # Squeeze all 1s
+            while len(tensor.shape) > 3 and 1 in tensor.shape:
+                for i in range(len(tensor.shape)):
+                    if tensor.shape[i] == 1:
+                        tensor = tensor.squeeze(i)
+            # Force 3D if less
+            if len(tensor.shape) == 1:
+                tensor = tensor.unsqueeze(0).unsqueeze(-1)  # [max] -> [1, max, 1]
+            elif len(tensor.shape) == 2:
+                tensor = tensor.unsqueeze(-1)  # [B, max] -> [B, max, 1]
+            return tensor
+        
         print(f"Pre-squeeze classes: {classes.shape}") # DEBUG
-        # NEW: Robust input squeeze (drop all 1s for pad dims)
-        bboxes = bboxes.squeeze()  # [B,1,1,max,8,3] -> [B, max,8,3]
-        classes = classes.squeeze()  # [B,1,1,max] -> [B, max]
+        bboxes = safe_squeeze(bboxes)
+        classes = safe_squeeze(classes)
         print(f"Post-squeeze classes: {classes.shape}") # DEBUG
-        if len(classes.shape) == 2:
-            classes = classes.unsqueeze(-1)  # [B, max, 1]
         
         if null_mask is not None:
-            null_mask = null_mask.squeeze()  # Full drop 1s
-            if len(null_mask.shape) == 2:
-                null_mask = null_mask.unsqueeze(-1)  # [B, max, 1]
-        
+            null_mask = safe_squeeze(null_mask)
         if mask is not None:
-            mask = mask.squeeze()
-            if len(mask.shape) == 2:
-                mask = mask.unsqueeze(-1)  # [B, max, 1]
+            mask = safe_squeeze(mask)
         
         # PRINT DEBUG (remove post-fix)
         print(f"In unpack classes: {classes.shape}")
-    
+        
         # Original unpack (now guaranteed 3D)
         B, T, N = classes.shape
+        print(f"Unpack success: B={B}, T={T}, N={N}") # DEBUG
         
         # Original rearranges
         bboxes = rearrange(bboxes, "b t n ... -> (b t) n ...")
@@ -124,36 +132,28 @@ class BBoxEmbedder(nn.Module):
         if mask is not None:
             mask = rearrange(mask, "b t n -> (b t) n")
         
-        # MODDED: Enhanced handle_none_mask (broadcast-safe)
         def handle_none_mask(_mask):
             if _mask is None:
-                _mask = torch.ones_like(classes[..., :1])  # [B*T, 1] full valid
+                _mask = torch.ones(len(bboxes), device=bboxes.device)
             else:
-                _mask = _mask.float()
-                # NEW: Force broadcast [B*T, 1] – mean trailing if multi-feat, squeeze 1s
-                if _mask.dim() > 2:
-                    _mask = _mask.mean(-1, keepdim=True)  # Collapse feat dims (e.g., 24->1)
-                _mask = _mask.squeeze(-1) if _mask.size(-1) == 1 else _mask  # Drop trailing 1
-                _mask = _mask.unsqueeze(-1)  # Ensure [B*T, 1] for dim broadcast
-            return _mask.type_as(self.null_pos_feature)
-        
+                _mask = _mask.flatten()
+            _mask = _mask.unsqueeze(-1).type_as(self.null_pos_feature)
+            return _mask
+
         mask = handle_none_mask(mask)
         null_mask = handle_none_mask(null_mask)
-        
-        # Original box embed
+
+        # box
         pos_emb = self.fourier_embedder(bboxes)
+
         pos_emb = pos_emb.reshape(pos_emb.shape[0], -1).type_as(self.null_pos_feature)
-        
-        # FIXED: Safe multiply (null_mask now [B*T,1] broadcasts to [B*T, dim])
-        pos_emb = pos_emb * null_mask + self.null_pos_feature[None, :] * (1 - null_mask)
+        pos_emb = pos_emb * null_mask + self.null_pos_feature[None] * (1 - null_mask)
         pos_emb = pos_emb * mask + self.mask_pos_feature[None] * (1 - mask)
 
-        # class
         cls_emb = self._class_tokens[classes.flatten()]
         cls_emb = cls_emb * null_mask + self.null_class_feature[None] * (1 - null_mask)
         cls_emb = cls_emb * mask + self.mask_class_feature[None] * (1 - mask)
 
-        # combine
         emb = self.forward_feature(pos_emb, cls_emb)
         emb = rearrange(emb, "(b n) ... -> b n ...", n=N)
         if self.after_proj:
