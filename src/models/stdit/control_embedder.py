@@ -224,18 +224,17 @@ class ControlEmbedder(nn.Module):
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
         print(f"--- ControlEmbedder.forward START ---")
 
-        # Unpack nested padded dicts (from Collate)
-        bboxes_pad = bboxes_dict['bboxes']  # {'data': [B,1,1,max_objs,8,3], 'mask': [B,1,1,max_objs]}
-        classes_pad = bboxes_dict['classes']  # {'data': [B,1,1,max_objs], 'mask': [B,1,1,max_objs]}
-        masks_pad = bboxes_dict['masks']  # {'data': [B,1,1,max_objs,?], 'mask': [B,1,1,max_objs]}
-
-        # Extract tensors + filter w/ mask (squeeze batch dims for embedder)
-        bbox_data = bboxes_pad['data'].squeeze(1).squeeze(1)  # [B, max_objs,8,3]
-        class_data = classes_pad['data'].squeeze(1).squeeze(1).float()  # [B, max_objs] – Float for embed
-        attention_mask = bboxes_pad['mask'].squeeze(1).squeeze(1).float()  # [B, max_objs] – Shared mask
+        # Unpack the dictionary of tensors
+        print(f"[ControlEmbedder] Unpacking bboxes_dict. Keys: {bboxes_dict.keys()}")
+        bbox_data = bboxes_dict['bboxes'].squeeze(1).squeeze(1)  # [B, max_objs,8,3]
+        class_data = bboxes_dict['classes'].squeeze(1).squeeze(1).float()  # [B, max_objs]
+        attention_mask = bboxes_dict['masks'].squeeze(1).squeeze(1).any(dim=0).float() # Use the mask from the bboxes
         null_mask = 1 - attention_mask
 
-        print(f"[ControlEmbedder] Shapes to BBoxEmbedder: bboxes {bbox_data.shape}, classes {class_data.shape}, mask {attention_mask.shape}")
+        print(f"[ControlEmbedder] Shapes to BBoxEmbedder:")
+        print(f"  - bboxes: {bbox_data.shape}, type: {bbox_data.dtype}")
+        print(f"  - classes: {class_data.shape}, type: {class_data.dtype}")
+        print(f"  - mask: {attention_mask.shape}, type: {attention_mask.dtype}")
 
         # Call BBoxEmbedder (now fed properly)
         bbox_tokens = self.bbox_embedder(
