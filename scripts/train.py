@@ -94,12 +94,12 @@ from src.registry import MODELS, SCHEDULERS, build_module
 
 # --- Training Configuration (can be moved to config.py later) ---
 class TrainingConfig:
-    num_epochs = 1
+    num_epochs = 10
     batch_size = 1  # Keep at 1 for now due to VRAM constraints
     gradient_accumulation_steps = 1  # Reduced to 1 to minimize memory
     learning_rate = 1e-5
     lr_warmup_steps = 500
-    mixed_precision = "bf16"  # Stable for softmax, no fp32 cast
+    mixed_precision = "fp16"  # Use fp16 for the proof run
     output_dir = "./training_checkpoints"
     seed = 42
     max_grad_norm = 1.0
@@ -131,7 +131,7 @@ def main():
         p.name
         for p in pathlib.Path(training_config.data_path).iterdir()
         if (p / "ride_id.json").exists()
-    ]
+    ][:50] # Use only 50 scenes for the proof run
     train_dataset = SensorGenDataset(scenes, pathlib.Path(training_config.data_path))
     train_dataloader = DataLoader(
         train_dataset,
