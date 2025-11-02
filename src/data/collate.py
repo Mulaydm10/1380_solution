@@ -86,4 +86,27 @@ def pad_collate_recursive(batch):
 
 class Collate:
     def __call__(self, batch):
-        return pad_collate_recursive(batch)
+        # More robust handling of bboxes_3d_data
+        print("--- Custom Collate Start ---")
+        
+        # Separate bboxes from the rest of the batch
+        bboxes_list = [d.pop('bboxes_3d_data') for d in batch]
+        
+        # Collate the rest of the batch using the recursive function
+        collated_batch = pad_collate_recursive(batch)
+        print(f"[Collate] Collated batch keys: {list(collated_batch.keys())}")
+
+        # Now, specifically collate the bboxes
+        # We need to extract the actual numpy arrays from the nested dict
+        bbox_arrays = [b['bboxes'] for b in bboxes_list]
+        collated_bboxes = general_ragged_pad(bbox_arrays)
+        print(f"[Collate] Collated bboxes['data'] shape: {collated_bboxes['data'].shape}")
+        print(f"[Collate] Collated bboxes['mask'] shape: {collated_bboxes['mask'].shape}")
+
+        # Re-integrate the correctly padded bboxes into the final batch
+        collated_batch['bboxes_3d_data'] = {
+            'bboxes': collated_bboxes
+        }
+        
+        print("--- Custom Collate End ---")
+        return collated_batch
