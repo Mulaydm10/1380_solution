@@ -88,6 +88,9 @@ def main():
     # Load VAE
     vae = build_module(vae_config_dict, MODELS)
     # Load STDiT3 model
+    model_config_dict['in_channels'] = 80
+    if accelerator.is_main_process:
+        print(f"[Model Build] Overriding model config. New config: {model_config_dict}")
     model = build_module(model_config_dict, MODELS)
 
     # Load pre-trained weights for STDiT3
