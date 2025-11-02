@@ -21,56 +21,7 @@ torch.backends.cudnn.benchmark = False
 torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
 
-def tile_vae_encode(vae, video, tile_size=128, overlap=16):
-    B, C, T, H, W = video.shape
-    step = tile_size - overlap
-    tiles = []
-    tile_positions = []  # (row_start_latent, col_start_latent)
 
-    # Extract tiles
-    for row in range(0, H, step):
-        for col in range(0, W, step):
-            end_row = min(row + tile_size, H)
-            end_col = min(col + tile_size, W)
-            tile = video[:, :, :, row:end_row, col:end_col]
-            pad_h = tile_size - tile.shape[3]
-            pad_w = tile_size - tile.shape[4]
-            tile = F.pad(tile, (0, pad_w, 0, pad_h), mode="constant", value=0)
-            with torch.inference_mode():
-                latent_tile = vae.encode(tile)
-            actual_h = (end_row - row) // 8
-            actual_w = (end_col - col) // 8
-            latent_tile = latent_tile[:, :, :, :actual_h, :actual_w]
-            tiles.append(latent_tile)
-            tile_positions.append((row // 8, col // 8))
-            del tile, latent_tile
-            torch.cuda.empty_cache()
-            gc.collect()
-
-    # Stitch: Iterate over actual tiles (dynamic, no grid)
-    latent_H = H // 8
-    latent_W = W // 8
-    stitched = torch.zeros(
-        B, tiles[0].shape[1], T // 4, latent_H, latent_W, device=video.device
-    )
-    count = torch.zeros(B, 1, T // 4, latent_H, latent_W, device=video.device)
-
-    for tile_idx, (row_start, col_start) in enumerate(tile_positions):
-        latent_tile = tiles[tile_idx]
-        row_end = min(row_start + latent_tile.shape[3], latent_H)
-        col_end = min(col_start + latent_tile.shape[4], latent_W)
-        h_slice = slice(row_start, row_end)
-        w_slice = slice(col_start, col_end)
-        stitched[:, :, :, h_slice, w_slice] += latent_tile[
-            :, :, :, : row_end - row_start, : col_end - col_start
-        ]
-        count[:, :, :, h_slice, w_slice] += 1
-
-    stitched /= count.clamp(min=1)
-    del tiles
-    torch.cuda.empty_cache()
-    gc.collect()
-    return stitched
 
 
 from config import model as model_config_dict  # Import configs
@@ -198,121 +149,37 @@ def main():
                 gc.collect()
                 torch.cuda.synchronize()
 
-                # === DUMMY DATA (T=4 to reduce memory further, H=W=32 for even smaller latents) ===
-                B, T, C, H, W = 1, 8, 3, 128, 128
-                NC = 5
-                N_COND = NC - 1
-                device = accelerator.device
-                dummy_gt_video = torch.randn(B, C, T, H, W, device=device)
-                dummy_cond_cam_raw = torch.randn(B, N_COND, C, T, H, W, device=device)
 
-                # === 3. Encode clean latents (Tiled, but with smaller inputs) ===
-                torch.cuda.empty_cache()
-                gc.collect()
-                vae.to(device)
-                with torch.inference_mode():
-                    clean_gt_latent = tile_vae_encode(vae, dummy_gt_video)
-                    # Repeat time to 2 if <2, pad spatial to 8x8 (reduced from 16)
-                    if clean_gt_latent.shape[2] < 2:
-                        clean_gt_latent = clean_gt_latent.repeat(1, 1, 2, 1, 1)
-                    if clean_gt_latent.shape[3] < 8:
-                        pad_h = 8 - clean_gt_latent.shape[3]
-                        pad_w = 8 - clean_gt_latent.shape[4]
-                        clean_gt_latent = F.pad(
-                            clean_gt_latent,
-                            (0, pad_w, 0, pad_h, 0, 0),
-                            mode="constant",
-                            value=0,
-                        )
-                    B_gt, C_latent, latent_T, latent_H, latent_W = clean_gt_latent.shape
+                with torch.no_grad():
+                    vae.to(accelerator.device)
+                    gt_video_for_latent = batch['images_gt'][:, 0:1, :, :, :].permute(0, 2, 1, 3, 4)
+                    gt_latents = vae.encode(gt_video_for_latent)
+                    vae.to("cpu")
 
-                    # Batch cond encodes in smaller groups to save mem
-                    cond_reshaped = dummy_cond_cam_raw.view(B * N_COND, C, T, H, W)
-                    cond_latents_tiled = []
-                    batch_size_cond = 1  # Process one at a time
-                    for i in range(0, B * N_COND, batch_size_cond):
-                        end_i = min(i + batch_size_cond, B * N_COND)
-                        cond_batch = cond_reshaped[i:end_i]
-                        cond_tile = tile_vae_encode(vae, cond_batch)
-                        # Repeat time to 2, pad spatial
-                        if cond_tile.shape[2] < 2:
-                            cond_tile = cond_tile.repeat(1, 1, 2, 1, 1)
-                        if cond_tile.shape[3] < 8:
-                            pad_h = 8 - cond_tile.shape[3]
-                            pad_w = 8 - cond_tile.shape[4]
-                            cond_tile = F.pad(
-                                cond_tile,
-                                (0, pad_w, 0, pad_h, 0, 0),
-                                mode="constant",
-                                value=0,
-                            )
-                        cond_latents_tiled.append(cond_tile)
-                        del cond_tile
-                        torch.cuda.empty_cache()
-                        gc.collect()
-                    cond_latents_raw = torch.cat(cond_latents_tiled, dim=0)
-                    del cond_latents_tiled
-                    cond_latents_raw = cond_latents_raw.view(
-                        B, N_COND, C_latent, latent_T, latent_H, latent_W
-                    )
-                    clean_cond_latents = cond_latents_raw.view(
-                        B, N_COND * C_latent, latent_T, latent_H, latent_W
-                    )
-                    del cond_latents_raw
+                # RFLOW noise schedule
+                t = torch.rand(gt_latents.shape[0], device=accelerator.device).view(-1, 1, 1, 1, 1)
+                noise = torch.randn_like(gt_latents)
+                noisy_latents = (1 - t) * gt_latents + t * noise
+                timesteps = t.squeeze(-1).squeeze(-1).squeeze(-1)
 
-                vae.to("cpu")
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.synchronize()
+                # Prepare conditioning for the model
+                from src.models.stdit.control_embedder import ControlEmbedder
+                control_embedder_instance = ControlEmbedder(model.config)
+                control_embedder_instance.to(accelerator.device)
 
-                # === 4. Add noise ===
-                noise = torch.randn_like(clean_gt_latent)
-                noisy_target = clean_gt_latent + noise
-                timesteps = torch.randint(0, 1000, (B,), device=device).long()
+                cond_emb = control_embedder_instance(
+                    bboxes_dict=batch['bboxes_3d_data'],
+                    camera_params=batch['camera_param'],
+                    bev_grid=batch['bev_grid']
+                )
 
-                x = clean_cond_latents
-                cond_cam = noisy_target
-
-                # === 6. Dummy conditioning (Minimal) ===
-                num_objects = 1
-                base_bbox = {
-                    "bboxes": torch.randn(B, 1, num_objects, 8, 3, device=device),
-                    "classes": torch.randint(0, 8, (B, 1, num_objects), device=device),
-                    "masks": torch.ones(B, 1, num_objects, device=device),
-                }
-                base_cams = torch.randn(B, 1, 7, 3, 7, device=device)
-                dummy_height = torch.tensor([H], device=device)
-                dummy_width = torch.tensor([W], device=device)
-
-                expanded_bbox = {
-                    k: repeat(v, "b ... -> (b nc) ...", nc=NC)
-                    for k, v in base_bbox.items()
-                }
-                expanded_cams = repeat(base_cams, "b ... -> (b nc) ...", nc=NC)
-
-                # Pre-forward clear
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.synchronize()
-
-                # === 7. Forward ===
+                # Forward pass
                 predicted_noise = model(
                     noisy_latents,
                     timesteps,
-                    bbox=batch['bboxes_3d_data'],
-                    cams=batch['camera_param'],
-                    bev_grid=batch['bev_grid'],
-                    height=dummy_height,
-                    width=dummy_width,
-                    NC=NC
+                    encoder_hidden_states=cond_emb
                 )
-
-                # === 8. Loss ===
-                target_start = 3 * C_latent
-                target_end = 4 * C_latent
-                target_pred = predicted_noise[:, target_start:target_end, :, :, :]
-                loss = F.mse_loss(target_pred, noise, reduction="mean")
-                print(f"Loss: {loss.item():.4f}")
+                loss = F.mse_loss(predicted_noise.float(), noise.float())
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
