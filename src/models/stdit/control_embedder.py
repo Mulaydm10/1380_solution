@@ -97,20 +97,20 @@ class BBoxEmbedder(nn.Module):
         print(f"--- BBoxEmbedder.forward START ---")
         print(f"Initial shapes: bboxes={bboxes.shape}, classes={classes.shape}, null_mask={null_mask.shape if null_mask is not None else None}")
 
-        # Unpack (original)
-        B, T, N_cls = classes.shape  # B=1, T=50, N_cls=1
-        print(f"Unpack Success: B={B}, T={T}, N_cls={N_cls}")
+        # The input is now 2D/3D, no time dimension to unpack
+        B, N_objs = classes.shape
+        print(f"Unpack Success: B={B}, N_objs={N_objs}")
 
         # Rearrange inputs
-        bboxes = rearrange(bboxes, "b t ... -> (b t) ...")
-        classes = rearrange(classes, "b t n -> (b t) n")
+        bboxes = rearrange(bboxes, "b n ... -> (b n) ...")
+        classes = rearrange(classes, "b n -> (b n)")
         print(f"Post-rearrange: bboxes={bboxes.shape}, classes={classes.shape}")
 
         if null_mask is not None:
-            null_mask = rearrange(null_mask, "b t n -> (b t) n")
+            null_mask = rearrange(null_mask, "b n -> (b n)")
             print(f"Post-rearrange: null_mask={null_mask.shape}")
         if mask is not None:
-            mask = rearrange(mask, "b t n -> (b t) n")
+            mask = rearrange(mask, "b n -> (b n)")
             print(f"Post-rearrange: mask={mask.shape}")
 
         # --- Fourier Embedding (Per-Corner) ---
