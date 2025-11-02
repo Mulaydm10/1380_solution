@@ -349,6 +349,7 @@ class STDiT3(PreTrainedModel):
         return cond_tokens, None
 
     def forward(self, x, t, encoder_hidden_states=None, **kwargs):
+        drop_cond_mask = None
         """
         Forward pass
         """
