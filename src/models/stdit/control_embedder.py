@@ -220,22 +220,26 @@ class ControlEmbedder(nn.Module):
         self.bev_embedder = BEVEmbedder(embed_dim=config.hidden_size)
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
-        # Selective squeeze for pad dims (1,2 =1s from pad; keep B=0, T=3)
-        bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(2)  # [1,1,1,50,8,3] -> [1,50,8,3]
-        class_data = bboxes_dict['classes']['data'].squeeze(1).squeeze(2)  # [1,1,1,50] -> [1,50]
-        print(f"Debug: Raw mask shape from dict: {bboxes_dict['bboxes']['mask'].shape}")
-        # Aggregate mask to per-object (any over corners [8,3] = valid if any coord real)
-        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().any(dim=[-1,-2]).float()  # [B, max,8,3] -> [B, max]
-        print(f"Debug: Aggregated attention_mask shape: {attention_mask.shape}")
-        null_mask = 1 - attention_mask  # [B, max]
+        print(f"--- ControlEmbedder.forward START ---")
+        # Bbox data
+        bbox_data = bboxes_dict['bboxes']['data'].squeeze(1).squeeze(2)
+        print(f"Initial bbox_data shape: {bbox_data.shape}")
 
-        # Unsqueeze to 3D for "b t n" (n=1 dummy)
-        attention_mask = attention_mask.unsqueeze(0).unsqueeze(-1)  # [B, max, 1]
-        null_mask = null_mask.unsqueeze(0).unsqueeze(-1)  # [B, max, 1]
-        print(f"Debug: Final attention_mask shape for BBoxEmbedder: {attention_mask.shape}")
-        print(f"Debug: Final null_mask shape for BBoxEmbedder: {null_mask.shape}")
+        # Class data: Squeeze all, rebuild to [B, max_objs, 1]
+        class_data = bboxes_dict['classes']['data'].squeeze()  # [B,1,1,max] -> [max] (for B=1)
+        print(f"Squeezed class_data shape: {class_data.shape}")
+        class_data = class_data.unsqueeze(0).unsqueeze(-1)  # [1, max,1]
+        print(f"Final class_data shape for BBoxEmbedder: {class_data.shape}")
 
-        # Call with per-object 3D masks
+        # Attention/null mask: Similar squeeze + rebuild to [1, max,1]
+        attention_mask = bboxes_dict['bboxes']['mask'].squeeze().any(dim=[-1,-2]).float()  # Per-obj aggregate [max]
+        print(f"Aggregated attention_mask shape: {attention_mask.shape}")
+        attention_mask = attention_mask.unsqueeze(0).unsqueeze(-1)  # [1, max,1]
+        null_mask = 1 - attention_mask
+        print(f"Final attention_mask shape for BBoxEmbedder: {attention_mask.shape}")
+        print(f"Final null_mask shape for BBoxEmbedder: {null_mask.shape}")
+
+        # Call (shapes now unpack-ready)
         bbox_tokens = self.bbox_embedder(
             bboxes=bbox_data,
             classes=class_data,
