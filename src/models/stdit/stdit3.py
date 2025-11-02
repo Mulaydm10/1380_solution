@@ -89,13 +89,16 @@ class STDiT3Block(nn.Module):
             "b ... -> b ...",  # No NC repeat
         ).chunk(6, dim=1)
 
+        print(f"[STDiT3Block.forward] Input x shape: {x.shape}")
         x_m = t2i_modulate(self.norm1(x), shift_msa, scale_msa)
+        print(f"[STDiT3Block.forward] Shape of x_m after norm1: {x_m.shape}")
 
         ######################
         # attention
         ######################
 
         x_m = rearrange(x_m, "b (T S) c -> b T (S c)", T=T, S=S)  # Unified rearrange (no NC)
+        print(f"[STDiT3Block.forward] Shape of x_m after rearrange for attention: {x_m.shape}")
         x_m = self.attn(x_m)
         x_m = rearrange(x_m, "b T (S c) -> b (T S) c", T=T, S=S)
 
@@ -332,8 +335,13 @@ class STDiT3(PreTrainedModel):
         x_b = self.x_embedder(x)  # [B, N=T*S, C] unified
         x = x_b + pos_emb  # [B, N, C]
 
+        print(f"[STDiT3.forward] Shape of x before blocks: {x.shape}")
+        print(f"[STDiT3.forward] Shape of y (encoder_hidden_states): {y.shape}")
+        print(f"[STDiT3.forward] Shape of t_mlp: {t_mlp.shape}")
+
         # === blocks ===
         for block_i in range(self.depth):
+            print(f"--- Entering STDiT3Block {block_i} ---")
             x = self.spatial_blocks[block_i](x, y, t_mlp, T=T, S=S)  # No NC
 
         # === final layer ===

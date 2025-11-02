@@ -158,7 +158,8 @@ class Attention(nn.Module):
 
         self.is_causal = False
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, **kwargs):
+        print(f"[Attention.forward] Input x shape: {x.shape}")
         B, N, C = x.shape
         # flash attn is not memory efficient for small sequences, this is empirical
         enable_flash_attn = self.enable_flash_attn and (N > B)
