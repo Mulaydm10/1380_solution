@@ -348,20 +348,7 @@ class STDiT3(PreTrainedModel):
         )
         return cond_tokens, None
 
-    def forward(
-        self,
-        x,
-        timestep,
-        cond_cam,
-        bbox,
-        cams,
-        height,
-        width,
-        NC,
-        bbox_mask=None,
-        drop_cond_mask=None,
-        **kwargs,
-    ):
+    def forward(self, x, t, encoder_hidden_states=None, **kwargs):
         """
         Forward pass
         """
