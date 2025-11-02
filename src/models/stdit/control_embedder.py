@@ -251,30 +251,16 @@ class ControlEmbedder(nn.Module):
         )
         
         # Cam stream (original)
-        # --- Camera Embedding ---
+        # === CAM EMBEDDING – FINAL VERSION ===
         print(f"--- Camera Embedding START ---")
         print(f"camera_params type: {type(camera_params)}")
-        if isinstance(camera_params, dict):
-            print(f"camera_params keys: {list(camera_params.keys())}")
-
-        # Get intrinsics dict (competition key)
-        intrinsics = camera_params.get('pinhole_intrinsics', camera_params.get('intrinsics', None))
-        if intrinsics is None:
-            raise KeyError("No 'pinhole_intrinsics' or 'intrinsics' in camera_params – Check dataset.py JSON load")
-        
-        print(f"Found intrinsics dict with keys: {list(intrinsics.keys())}")
-
-        # Build K [3,3] from attributes (competition format)
-        K = torch.zeros(3,3, device=bbox_tokens.device, dtype=torch.float32)
-        K[0,0] = intrinsics['fx']
-        K[1,1] = intrinsics['fy']
-        K[0,2] = intrinsics['cx']
-        K[1,2] = intrinsics['cy']
-        K[2,2] = 1.0
-        print(f"Built K matrix with shape: {K.shape}")
-
-        # Call original (assume embed_cam takes [3,3] K)
+        cam_tensor = camera_params['data']
+        print(f"cam_tensor shape: {cam_tensor.shape}")
+        K = cam_tensor[:, 0, :, :3]
+        print(f"Final K shape for embedder: {K.shape}")
         cam_tokens, _ = self.cam_embedder.embed_cam(K)
+        print(f"cam_tokens shape: {cam_tokens.shape}")
+        print(f"--- Camera Embedding END ---")
         
         # BEV stream (new; optional)
         if bev_grid is not None:
