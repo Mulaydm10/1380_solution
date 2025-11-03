@@ -210,48 +210,41 @@ def main():
                 gc.collect()
                 torch.cuda.synchronize()
 
-
                 with torch.no_grad():
                     vae.to(accelerator.device)
-                    # The VAE can only encode one view at a time. We must loop through the 5 views.
-                    # Original shape: [B, 5, C, H, W]
                     images_gt = batch['images_gt']
                     if accelerator.is_main_process:
                         print(f"[VAE Encode] Input images_gt shape: {images_gt.shape}")
 
                     latents_list = []
-                    for i in range(images_gt.size(1)): # Loop through the 5 views
-                        view = images_gt[:, i:i+1, :, :, :] # Get one view: [B, 1, C, H, W]
-                        view_permed = view.permute(0, 2, 1, 3, 4) # Permute to [B, C, 1, H, W]
+                    for i in range(images_gt.size(1)):
+                        view = images_gt[:, i:i+1, :, :, :]
+                        view_permed = view.permute(0, 2, 1, 3, 4)
                         latent_view = vae.encode(view_permed)
                         latents_list.append(latent_view)
                     
-                    gt_latents = torch.cat(latents_list, dim=1) # Stack along the view dimension: [B, 5, C_latent, H_latent, W_latent]
+                    gt_latents = torch.cat(latents_list, dim=1)
                     if accelerator.is_main_process:
                         print(f"[VAE Encode] Output gt_latents shape: {gt_latents.shape}")
 
                     vae.to("cpu")
 
-                # RFLOW noise schedule - applied to all 5 views
                 t = torch.rand(gt_latents.shape[0], device=accelerator.device).view(-1, 1, 1, 1, 1)
-                noise = torch.randn_like(gt_latents) # Noise is now [B, 5, C, H, W]
+                noise = torch.randn_like(gt_latents)
                 noisy_latents = (1 - t) * gt_latents + t * noise
                 timesteps = t.squeeze(-1).squeeze(-1).squeeze(-1)
 
-                # Prepare conditioning for the model
                 from src.models.stdit.control_embedder import ControlEmbedder
                 control_embedder_instance = ControlEmbedder(model.config)
                 control_embedder_instance.to(accelerator.device)
 
+                bboxes_list = batch['bboxes_3d_data']
+                cond_emb = control_embedder_instance(
+                    bboxes_list,
+                    batch['camera_param'],
+                    batch['bev_grid']
+                )
 
-            bboxes_list = batch['bboxes_3d_data']
-            cond_emb = control_embedder_instance(
-                bboxes_list,
-                batch['camera_param'],
-                batch['bev_grid']
-            )
-
-                # Forward pass
                 predicted_noise = model(
                     noisy_latents,
                     timesteps,
@@ -269,11 +262,10 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
-                # Post-step clear
                 torch.cuda.empty_cache()
                 gc.collect()
                 torch.cuda.synchronize()
-                del predicted_noise, noise
+                del predicted_noise, noise, cond_emb, gt_latents, noisy_latents
 
             # Logging
             if accelerator.sync_gradients:
