@@ -183,7 +183,10 @@ if __name__ == "__main__":
             for i, t in enumerate(timesteps):
                 with torch.no_grad():
                     t_batch = t.repeat(latents.shape[0]).to(device)
-                    noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
+                    print(f"[DEBUG] Shape of latents: {latents.shape}")
+                print(f"[DEBUG] Shape of cond_emb: {cond_emb.shape}")
+                print(f"[DEBUG] Model config input_size: {model.config.input_size}")
+                noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
                     latents = scheduler.step(noise_pred, t, latents).prev_sample
 
             # Decode and save
