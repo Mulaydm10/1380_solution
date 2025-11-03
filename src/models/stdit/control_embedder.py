@@ -295,7 +295,7 @@ class ControlEmbedder(nn.Module):
             return torch.zeros(0, self.embed_dim, device=camera_params.device)  # Empty batch
 
         # Max objs from list (shape[2] for bboxes dim)
-        max_objs = max(b.shape[2] for b in bboxes_per_scene) if bboxes_per_scene else 0
+        max_objs = max(b.shape[2] for b in bboxes_per_scene) if len(bboxes_per_scene) > 0 and all(b.numel() > 0 for b in bboxes_per_scene) else 0
         print(f"[Embedder] Batch max_objs: {max_objs} (from {B} scenes)")
 
         # Pad lists (ragged to batch-padded)
