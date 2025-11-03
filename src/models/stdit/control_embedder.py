@@ -321,7 +321,8 @@ class ControlEmbedder(nn.Module):
         bbox_tokens = self.bbox_embedder(bboxes=bbox_data, classes=class_data, mask=attention_mask, **kwargs)
 
         # Rest (cam/bev) unchanged
-        cam_tokens, _ = self.cam_embedder.embed_cam(camera_params)
+        cam_tokens = self.cam_embedder.embed_cam(camera_params)[0].unsqueeze(1)
+        print(f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens {bev_tokens.shape if bev_grid is not None else 'None'}")
         if bev_grid is not None:
             bev_tokens = self.bev_embedder(bev_grid)
             cond_embeds = torch.cat([bbox_tokens, cam_tokens, bev_tokens], dim=1)
