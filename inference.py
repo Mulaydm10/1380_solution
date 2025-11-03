@@ -169,7 +169,7 @@ ddpm_config = {
     'clip_sample': True,  # Clip noise for stability
     'thresholding': False,  # No threshold
 }
-scheduler = DDPMScheduler(**ddpm_config).to(device)
+scheduler = DDPMScheduler(**ddpm_config)
 
 # Set steps for loop (tune 8-50)
 scheduler.set_timesteps(args.steps, device=device)  # Low for fast test; high for quality
