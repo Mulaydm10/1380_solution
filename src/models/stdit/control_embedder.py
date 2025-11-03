@@ -8,9 +8,7 @@ import torch.nn.functional as F
 from mmengine.registry import build_from_cfg
 from einops import repeat
 
-print("[control_embedder.py] Importing REGISTRY...")
-from src.registry import REGISTRY
-print("[control_embedder.py] REGISTRY imported.")
+
 from einops import repeat
 
 from .utils import zero_module
@@ -265,13 +263,17 @@ def general_ragged_pad(list_of_tensors, pad_value=0.0):
     }
 
 class ControlEmbedder(nn.Module):
-    def __init__(self, **kwargs):
+    def __init__(self, models_registry, **kwargs):
         super().__init__()
-        self.cam_embedder = build_from_cfg(kwargs.pop('cam_encoder_param'), REGISTRY,
+        self.models_registry = models_registry # Store the injected registry
+        embed_dim = kwargs.get('hidden_size', 1152) # Get embed_dim from kwargs, default to 1152
+
+        self.cam_embedder = build_from_cfg(kwargs.pop('cam_encoder_param'), models_registry,
                                            default_args={'_type_': kwargs.pop('cam_encoder_cls')})
-        self.bbox_embedder = build_from_cfg(kwargs.pop('bbox_embedder_param'), REGISTRY,
+        self.bbox_embedder = build_from_cfg(kwargs.pop('bbox_embedder_param'), models_registry,
                                             default_args={'_type_': kwargs.pop('bbox_embedder_cls')})
-        self.bev_embedder = BEVEmbedder()
+        self.bev_embedder = BEVEmbedder(embed_dim=embed_dim) # Pass embed_dim
+
 
     def forward(self, bboxes_list, camera_params, bev_grid=None, **kwargs):
         """
