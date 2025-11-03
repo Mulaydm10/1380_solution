@@ -208,7 +208,7 @@ class CamEmbedder(nn.Module):
         print(f"[CamEmbedder.embed_cam] param shape: {param.shape}")
         if param.shape[1] == 4:
             param = param[:, :-1]
-        (B, T, C_param, D_param, E_param) = param.shape
+        (B, T, _, C_param, E_param) = param.shape
         bs = B * T
         param = rearrange(param, "b t c d e -> (b t) c d e")
         print(f"[CamEmbedder.embed_cam] param shape after rearrange: {param.shape}")
