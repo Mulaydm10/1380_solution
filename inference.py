@@ -7,39 +7,39 @@ import argparse
 import json
 import math
 import random
+from pathlib import Path
+
 import numpy as np
 import torch
 import torch.nn as nn
-from pathlib import Path
+from diffusers import DDPMScheduler
 from PIL import Image
+from safetensors.torch import load_file
 from tqdm import tqdm
 
-from safetensors.torch import load_file
-
-from config import (
-    model as model_config_dict,
-    scheduler as scheduler_config_dict,
-    vae as vae_config_dict,
-)
+from config import model as model_config_dict
+from config import scheduler as scheduler_config_dict
+from config import vae as vae_config_dict
 from src.data.collate import Collate
 from src.data.dataset import SensorGenDataset
 from src.models.stdit.control_embedder import ControlEmbedder
 from src.models.stdit.stdit3 import STDiT3, STDiT3Config
-from diffusers import DDPMScheduler
 from src.schedulers.rf.rectified_flow import RFlowScheduler
 
 # Replace RFlowScheduler with DDPMScheduler
-scheduler_config_dict['type'] = 'diffusers.DDPMScheduler'
-scheduler_config_dict['beta_schedule'] = 'squaredcos_cap_v2'
+scheduler_config_dict["type"] = "diffusers.DDPMScheduler"
+scheduler_config_dict["beta_schedule"] = "squaredcos_cap_v2"
 
 # Remove RFlowScheduler-specific arguments
-if 'use_timestep_transform' in scheduler_config_dict:
-    del scheduler_config_dict['use_timestep_transform']
-if 'transform_scale' in scheduler_config_dict:
-    del scheduler_config_dict['transform_scale']
+if "use_timestep_transform" in scheduler_config_dict:
+    del scheduler_config_dict["use_timestep_transform"]
+if "transform_scale" in scheduler_config_dict:
+    del scheduler_config_dict["transform_scale"]
+
 
 class RFlowScheduler:
     pass
+
 
 def partial_load_checkpoint(model, checkpoint_path, map_location):
     print("=== Partial Checkpoint Load START ===")
@@ -59,15 +59,18 @@ def partial_load_checkpoint(model, checkpoint_path, map_location):
             loaded_count += 1
         else:
             skipped_keys.append(key)
-            if 'weight' in key:
+            if "weight" in key:
                 nn.init.kaiming_uniform_(model_value, a=math.sqrt(5))
             else:
                 nn.init.zeros_(model_value)
 
     model.load_state_dict(model_dict)
     print(f"Successfully loaded {loaded_count} matching keys.")
-    print(f"Skipped and re-initialized {len(skipped_keys)} mismatched keys: {skipped_keys}")
+    print(
+        f"Skipped and re-initialized {len(skipped_keys)} mismatched keys: {skipped_keys}"
+    )
     return loaded_count, skipped_keys
+
 
 def save_gif(images, path, fps=2):
     images = (images.clamp(-1, 1) + 1) / 2
@@ -89,7 +92,9 @@ def save_gif(images, path, fps=2):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, default="/content/dataset/test_data_300/")
+    parser.add_argument(
+        "--data_dir", type=str, default="/content/dataset/test_data_300/"
+    )
     parser.add_argument("--output_dir", type=str, default="./inference_results")
     parser.add_argument("--num_scenes", type=int, default=20)
     parser.add_argument("--steps", type=int, default=50)
@@ -104,9 +109,12 @@ if __name__ == "__main__":
     # 1. Initialize Components
     print("--- Initializing VAE, Model, Scheduler, and Embedder ---")
     vae = build_module(vae_config_dict, MODELS).to(device, dtype)
-    vae_state_dict = load_file("/content/1380-solution_github/checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors", device=device)
+    vae_state_dict = load_file(
+        "/content/1380-solution_github/checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors",
+        device=device,
+    )
     # Add the 'module.' prefix to match the model's architecture
-    vae_state_dict_with_prefix = {f'module.{k}': v for k, v in vae_state_dict.items()}
+    vae_state_dict_with_prefix = {f"module.{k}": v for k, v in vae_state_dict.items()}
     vae.load_state_dict(vae_state_dict_with_prefix)
     vae.eval()
 
@@ -114,20 +122,28 @@ if __name__ == "__main__":
     vae = vae.cpu()
 
     # Create a config object and then instantiate the model
-    model_config_dict['input_size'] = (16, 80, 32, 32)
-    model_config_dict['patch_size'] = (1, 2, 2)
-    model_config_dict['enable_flash_attn'] = True
+    model_config_dict["input_size"] = (16, 80, 32, 32)
+    model_config_dict["patch_size"] = (1, 2, 2)
+    model_config_dict["enable_flash_attn"] = True
     config = STDiT3Config(**model_config_dict)
     model = STDiT3(config).to(device, dtype)
     # Dynamically find the latest checkpoint from training_checkpoints
-    training_checkpoints_dir = Path("/content/1380-solution_github/training_checkpoints")
-    epoch_dirs = [d for d in training_checkpoints_dir.iterdir() if d.is_dir() and d.name.startswith("epoch_")]
+    training_checkpoints_dir = Path(
+        "/content/1380-solution_github/training_checkpoints"
+    )
+    epoch_dirs = [
+        d
+        for d in training_checkpoints_dir.iterdir()
+        if d.is_dir() and d.name.startswith("epoch_")
+    ]
 
     if not epoch_dirs:
-        raise FileNotFoundError(f"No epoch directories found in {training_checkpoints_dir}")
+        raise FileNotFoundError(
+            f"No epoch directories found in {training_checkpoints_dir}"
+        )
 
     # Sort by epoch number to get the latest
-    latest_epoch_dir = sorted(epoch_dirs, key=lambda p: int(p.name.split('_')[1]))[-1]
+    latest_epoch_dir = sorted(epoch_dirs, key=lambda p: int(p.name.split("_")[1]))[-1]
     latest_checkpoint_path = latest_epoch_dir / "model.safetensors"
 
     print(f"Loading main model from latest checkpoint: {latest_checkpoint_path}")
@@ -139,10 +155,10 @@ if __name__ == "__main__":
     print(f"[DEBUG] Post-init model.pos_embed: {model.pos_embed}")
 
     # Clean scheduler_config_dict before building
-    if 'use_timestep_transform' in scheduler_config_dict:
-        del scheduler_config_dict['use_timestep_transform']
-    if 'transform_scale' in scheduler_config_dict:
-        del scheduler_config_dict['transform_scale']
+    if "use_timestep_transform" in scheduler_config_dict:
+        del scheduler_config_dict["use_timestep_transform"]
+    if "transform_scale" in scheduler_config_dict:
+        del scheduler_config_dict["transform_scale"]
     scheduler = build_module(scheduler_config_dict, SCHEDULERS)
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
@@ -155,7 +171,9 @@ if __name__ == "__main__":
     all_scene_paths = [p for p in Path(args.data_dir).iterdir() if p.is_dir()]
     random.shuffle(all_scene_paths)
     selected_scenes = all_scene_paths[: args.num_scenes]
-    print(f"Found {len(all_scene_paths)} total scenes. Randomly selected {len(selected_scenes)} for inference.")
+    print(
+        f"Found {len(all_scene_paths)} total scenes. Randomly selected {len(selected_scenes)} for inference."
+    )
 
     # 3. Main Inference Loop
     for scene_path in tqdm(selected_scenes, desc="Processing Scenes"):
@@ -165,7 +183,7 @@ if __name__ == "__main__":
             ds = SensorGenDataset(
                 scenes=[scene_path.name],
                 data_root=scene_path.parent,
-                mode='inference',
+                mode="inference",
                 num_cond_cams=4,
                 image_size=(512, 512),
             )
@@ -173,14 +191,16 @@ if __name__ == "__main__":
 
             # Manually create batch to mimic default collate used in train.py
             batch_data = {
-                'bboxes_3d_data': {
-                    'bboxes': [scene_data['bboxes_3d_data']['bboxes']],
-                    'classes': [scene_data['bboxes_3d_data']['classes']],
-                    'masks': [scene_data['bboxes_3d_data']['masks']],
+                "bboxes_3d_data": {
+                    "bboxes": [scene_data["bboxes_3d_data"]["bboxes"]],
+                    "classes": [scene_data["bboxes_3d_data"]["classes"]],
+                    "masks": [scene_data["bboxes_3d_data"]["masks"]],
                 },
-                'camera_param': torch.as_tensor(scene_data['camera_param']).unsqueeze(0),
-                'bev_grid': torch.as_tensor(scene_data['bev_grid']).unsqueeze(0),
-                'ride_id': [scene_data['ride_id']],
+                "camera_param": torch.as_tensor(scene_data["camera_param"]).unsqueeze(
+                    0
+                ),
+                "bev_grid": torch.as_tensor(scene_data["bev_grid"]).unsqueeze(0),
+                "ride_id": [scene_data["ride_id"]],
             }
 
             # Move data to device
@@ -190,18 +210,22 @@ if __name__ == "__main__":
                 elif isinstance(value, dict):
                     for sub_key, sub_value in value.items():
                         if isinstance(sub_value, list):
-                            batch_data[key][sub_key] = [torch.as_tensor(t).to(device, dtype) for t in sub_value]
+                            batch_data[key][sub_key] = [
+                                torch.as_tensor(t).to(device, dtype) for t in sub_value
+                            ]
 
             # Generate conditioning embedding
             with torch.no_grad():
                 embedder.to(device)
                 cond_emb = embedder(
-                    batch_data['bboxes_3d_data'],
-                    batch_data['camera_param'],
-                    bev_grid=batch_data['bev_grid'],
+                    batch_data["bboxes_3d_data"],
+                    batch_data["camera_param"],
+                    bev_grid=batch_data["bev_grid"],
                 )
                 embedder.cpu()
-                print(f"[Inference] Cond emb shape: {cond_emb.shape} – Full (bbox+class+mask+bev tokens)")
+                print(
+                    f"[Inference] Cond emb shape: {cond_emb.shape} – Full (bbox+class+mask+bev tokens)"
+                )
 
             # Denoising loop
             latents = torch.randn((1, 16, 80, 32, 32), device=device, dtype=dtype)
@@ -235,6 +259,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"!!! Failed to process scene {scene_path.name}: {e}")
             import traceback
+
             traceback.print_exc()
             continue
 
