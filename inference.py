@@ -153,10 +153,6 @@ if __name__ == "__main__":
 
             # Generate conditioning embedding
             with torch.no_grad():
-                # No loop/rebuild – collate b=1 already pads {'bboxes_3d_data': {'bboxes': tensor, 'classes': tensor, 'masks': tensor}}
-                # With mask=1.0 for single scene (no real pad)
-            # Generate conditioning embedding
-            with torch.no_grad():
                 # Direct pass: Collate b=1 padded dict = full {'bboxes': sub-pad, 'classes': sub-pad, 'masks': sub-pad}
                 # .get('bboxes', []) = sub-dict → classes_per_scene non-empty from data/mask
                 cond_emb = embedder(
