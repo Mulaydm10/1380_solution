@@ -92,7 +92,9 @@ if __name__ == "__main__":
     print("--- Initializing VAE, Model, Scheduler, and Embedder ---")
     vae = build_module(vae_config_dict, MODELS).to(device, dtype)
     vae_state_dict = load_file("/content/1380-solution_github/checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors", device=device)
-    vae.load_state_dict(vae_state_dict)
+    # Add the 'module.' prefix to match the model's architecture
+    vae_state_dict_with_prefix = {f'module.{k}': v for k, v in vae_state_dict.items()}
+    vae.load_state_dict(vae_state_dict_with_prefix)
     vae.eval()
 
     model = STDiT3(**model_config_dict).to(device, dtype)
