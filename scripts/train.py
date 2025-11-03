@@ -147,7 +147,9 @@ def main():
     model_config_dict['in_channels'] = 80
     if accelerator.is_main_process:
         print(f"[Model Build] Overriding model config. New config: {model_config_dict}")
+    print("[train.py] About to build model...")
     model = build_module(model_config_dict, MODELS)
+    print("[train.py] Model built successfully.")
 
     # Load pre-trained weights for STDiT3 using the custom partial loader
     ckpt_path = "/content/1380-solution_github/checkpoints/ckpt/ema.pt"

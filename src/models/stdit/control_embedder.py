@@ -1,12 +1,16 @@
 import logging
 
 import timm
+print("[control_embedder.py] Importing control_embedder.py...")
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 from mmengine.registry import build_from_cfg
+from einops import repeat
+
+print("[control_embedder.py] Importing REGISTRY...")
 from src.registry import REGISTRY
+print("[control_embedder.py] REGISTRY imported.")
 from einops import repeat
 
 from .utils import zero_module
