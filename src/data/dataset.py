@@ -123,7 +123,7 @@ class SensorGenDataset(Dataset):
         result["ride_id"] = str(scene.ride_id)
         result["camera_names"] = scene.camera_names
 
-        if self.mode == 'train':
-            result['bev_grid'] = rasterize_bev(result['bboxes_3d_data'], result['map'])
+        # Always generate BEV from bboxes/map (geo cond, mode-agnostic)
+        result['bev_grid'] = rasterize_bev(result['bboxes_3d_data'], result['map'])
 
         return result
