@@ -250,6 +250,8 @@ if __name__ == "__main__":
                 decoded_frames = []
                 for i in range(latents.size(1)):
                     single_view_latent = latents[:, i, :, :, :].unsqueeze(2)
+                    print(f"[DEBUG] VAE dtype: {vae.dtype}, VAE device: {vae.device}")
+                    print(f"[DEBUG] single_view_latent dtype: {single_view_latent.dtype}, single_view_latent device: {single_view_latent.device}")
                     decoded_view = vae.decode(single_view_latent).sample
                     decoded_frames.append(decoded_view)
                 images = torch.cat(decoded_frames, dim=1)

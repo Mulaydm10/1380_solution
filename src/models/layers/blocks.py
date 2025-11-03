@@ -1,8 +1,8 @@
-import os
 import functools
-import math
-from typing import Optional
 import logging
+import math
+import os
+from typing import Optional
 
 USE_XFORMERS = eval(os.environ.get("USE_XFORMERS", "True"))
 
@@ -43,7 +43,9 @@ class LlamaRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-def get_layernorm(hidden_size: torch.Tensor, eps: float, affine: bool, use_kernel: bool):
+def get_layernorm(
+    hidden_size: torch.Tensor, eps: float, affine: bool, use_kernel: bool
+):
     # Always use the native PyTorch LayerNorm to avoid Apex dependency issues.
     return nn.LayerNorm(hidden_size, eps, elementwise_affine=affine)
 
@@ -91,7 +93,9 @@ class PatchEmbed3D(nn.Module):
         self.in_chans = in_chans
         self.embed_dim = embed_dim
 
-        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv3d(
+            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:
@@ -159,7 +163,6 @@ class Attention(nn.Module):
         self.is_causal = False
 
     def forward(self, x, **kwargs):
-        print(f"[Attention.forward] Input x shape: {x.shape}")
         B, N, C = x.shape
         # flash attn is not memory efficient for small sequences, this is empirical
         enable_flash_attn = self.enable_flash_attn and (N > B)
@@ -242,7 +245,6 @@ class MultiHeadCrossAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(d_model, d_model)
         self.proj_drop = nn.Dropout(proj_drop)
-
 
     def forward(self, x, cond, mask=None):
         # query/value: img tokens; key: condition; mask: if padding tokens
@@ -328,8 +330,12 @@ class T2IFinalLayer(nn.Module):
         super().__init__()
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Linear(hidden_size, num_patch * out_channels, bias=True)
-        self.scale_shift_table = nn.Parameter(torch.randn(2, hidden_size) / hidden_size**0.5)
-        print(f"T2IFinalLayer init: scale_shift_table shape {self.scale_shift_table.shape}")
+        self.scale_shift_table = nn.Parameter(
+            torch.randn(2, hidden_size) / hidden_size**0.5
+        )
+        print(
+            f"T2IFinalLayer init: scale_shift_table shape {self.scale_shift_table.shape}"
+        )
         self.out_channels = out_channels
         self.d_t = d_t
         self.d_s = d_s
@@ -352,7 +358,9 @@ class T2IFinalLayer(nn.Module):
         shift, scale = (self.scale_shift_table[None] + t[:, None]).chunk(2, dim=1)
         x = t2i_modulate(self.norm_final(x), shift, scale)
         if x_mask is not None:
-            shift_zero, scale_zero = (self.scale_shift_table[None] + t0[:, None]).chunk(2, dim=1)
+            shift_zero, scale_zero = (self.scale_shift_table[None] + t0[:, None]).chunk(
+                2, dim=1
+            )
             x_zero = t2i_modulate(self.norm_final(x), shift_zero, scale_zero)
             x = self.t_mask_select(x_mask, x, x_zero, T, S)
         x = self.linear(x)
@@ -391,13 +399,17 @@ class TimestepEmbedder(nn.Module):
         # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
         half = dim // 2
         freqs = torch.exp(
-            -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
+            -math.log(max_period)
+            * torch.arange(start=0, end=half, dtype=torch.float32)
+            / half
         )
         freqs = freqs.to(device=t.device)
         args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
-            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+            embedding = torch.cat(
+                [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
+            )
         return embedding
 
     def forward(self, t, dtype):
@@ -416,7 +428,9 @@ class LabelEmbedder(nn.Module):
     def __init__(self, num_classes, hidden_size, dropout_prob):
         super().__init__()
         use_cfg_embedding = dropout_prob > 0
-        self.embedding_table = nn.Embedding(num_classes + use_cfg_embedding, hidden_size)
+        self.embedding_table = nn.Embedding(
+            num_classes + use_cfg_embedding, hidden_size
+        )
         self.num_classes = num_classes
         self.dropout_prob = dropout_prob
 
@@ -444,7 +458,9 @@ class SizeEmbedder(TimestepEmbedder):
     """
 
     def __init__(self, hidden_size, frequency_embedding_size=256):
-        super().__init__(hidden_size=hidden_size, frequency_embedding_size=frequency_embedding_size)
+        super().__init__(
+            hidden_size=hidden_size, frequency_embedding_size=frequency_embedding_size
+        )
         self.mlp = nn.Sequential(
             nn.Linear(frequency_embedding_size, hidden_size, bias=True),
             nn.SiLU(),
@@ -462,7 +478,9 @@ class SizeEmbedder(TimestepEmbedder):
             assert s.shape[0] == bs
         b, dims = s.shape[0], s.shape[1]
         s = rearrange(s, "b d -> (b d)")
-        s_freq = self.timestep_embedding(s, self.frequency_embedding_size).to(self.dtype)
+        s_freq = self.timestep_embedding(s, self.frequency_embedding_size).to(
+            self.dtype
+        )
         s_emb = self.mlp(s_freq)
         s_emb = rearrange(s_emb, "(b d) d2 -> b (d d2)", b=b, d=dims, d2=self.outdim)
         return s_emb
@@ -546,7 +564,9 @@ def get_2d_sincos_pos_embed(
     grid = grid.reshape([2, 1, grid_size[1], grid_size[0]])
     pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
     if cls_token and extra_tokens > 0:
-        pos_embed = np.concatenate([np.zeros([extra_tokens, embed_dim]), pos_embed], axis=0)
+        pos_embed = np.concatenate(
+            [np.zeros([extra_tokens, embed_dim]), pos_embed], axis=0
+        )
     return pos_embed
 
 
