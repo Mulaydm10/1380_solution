@@ -289,6 +289,9 @@ class ControlEmbedder(nn.Module):
         Pads to batch max; embeds.
         """
         print(f"--- ControlEmbedder.forward START (Batch {len(bboxes_list)} Scenes) ---")
+        print(f"[ControlEmbedder.forward] Type of bboxes_list: {type(bboxes_list)}")
+        if isinstance(bboxes_list, dict):
+            print(f"[ControlEmbedder.forward] Keys in bboxes_list: {bboxes_list.keys()}")
 
         B = len(bboxes_list)
         if B == 0:
