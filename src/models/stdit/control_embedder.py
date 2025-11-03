@@ -285,23 +285,62 @@ class ControlEmbedder(nn.Module):
 
     def forward(self, bboxes_list, camera_params, bev_grid=None, **kwargs):
         """
-        bboxes_list: List of scene dicts [{'bboxes': tensor[N_objs,8,3], 'classes': [N], 'masks': [N,?]}, ...] – From simple DL
+        bboxes_list: Dict of lists from DL batch
         Pads to batch max; embeds.
         """
-        print(f"--- ControlEmbedder.forward START (Batch {len(bboxes_list)} Scenes) ---")
+        print(f"--- ControlEmbedder.forward START (Batch {len(bboxes_list['bboxes'])} Scenes) ---")
+        print(f"[ControlEmbedder.forward] Received bboxes_list keys: {bboxes_list.keys()}")
 
-        B = len(bboxes_list)
+        bboxes_per_scene = bboxes_list['bboxes']
+        classes_per_scene = [torch.tensor(c, dtype=torch.long) for c in bboxes_list['classes']]
+        masks_per_scene = [torch.tensor(m, dtype=torch.bool) for m in bboxes_list['masks']]
+
+        B = len(bboxes_per_scene)
         if B == 0: return torch.zeros(1, self.embed_dim)
 
-        # --- Logging: Inspect incoming list ---
-        for i, scene in enumerate(bboxes_list):
-            print(f"  [Scene {i}] bboxes: {scene['bboxes'].shape}, classes: {len(scene['classes'])}, masks: {len(scene['masks'])}")
+        # --- Logging: Inspect incoming lists ---
+        for i in range(B):
+            print(f"  [Scene {i}] bboxes: {bboxes_per_scene[i].shape}, classes: {classes_per_scene[i].shape}, masks: {masks_per_scene[i].shape}")
 
-        # Extract per-component lists
-        bboxes_per_scene = [scene['bboxes'] for scene in bboxes_list]
-        classes_per_scene = [torch.tensor(scene['classes'], dtype=torch.long) for scene in bboxes_list]
-        masks_per_scene = [torch.tensor(scene['masks'], dtype=torch.bool) for scene in bboxes_list]
+        # Pad each to max in batch (ragged → padded)
+        max_objs = max(len(b) for b in bboxes_per_scene) if bboxes_per_scene else 0
+        print(f"[Embedder] Found max_objs={max_objs} in batch.")
 
+        bboxes_pad = general_ragged_pad(bboxes_per_scene, pad_value=0.0)
+        classes_pad = general_ragged_pad(classes_per_scene, pad_value=-100)
+        masks_pad = general_ragged_pad(masks_per_scene, pad_value=False)
+
+        print(f"  [Padding] bboxes_pad['data']: {bboxes_pad['data'].shape}, bboxes_pad['mask']: {bboxes_pad['mask'].shape}")
+        print(f"  [Padding] classes_pad['data']: {classes_pad['data'].shape}, classes_pad['mask']: {classes_pad['mask'].shape}")
+        print(f"  [Padding] masks_pad['data']: {masks_pad['data'].shape}, masks_pad['mask']: {masks_pad['mask'].shape}")
+
+        # Extract tensors
+        bbox_data = bboxes_pad['data']
+        class_data = classes_pad['data'].long()
+        attention_mask = bboxes_pad['mask'].any(dim=-1).any(dim=-1)
+        null_mask = ~attention_mask
+
+        print(f"[Embedder] Padded shapes to BBoxEmbedder: bboxes {bbox_data.shape}, classes {class_data.shape}, mask {attention_mask.shape}")
+
+        # BBoxEmbedder call (padded inputs)
+        bbox_tokens = self.bbox_embedder(
+            bboxes=bbox_data,
+            classes=class_data,
+            mask=attention_mask,
+            null_mask=null_mask,
+            **kwargs
+        )
+
+        # Cam/BEV as before (batch-level)
+        cam_tokens = self.cam_embedder(camera_params)
+        if bev_grid is not None:
+            bev_tokens = self.bev_embedder(bev_grid)
+            cond_embeds = torch.cat([bbox_tokens, cam_tokens, bev_tokens], dim=1)
+        else:
+            cond_embeds = torch.cat([bbox_tokens, cam_tokens], dim=1)
+
+        print(f"[Embedder] Final cond_embeds: {cond_embeds.shape}")
+        return cond_embeds
         # Pad each to max in batch (ragged → padded)
         max_objs = max(len(b) for b in bboxes_per_scene) if bboxes_per_scene else 0
         print(f"[Embedder] Found max_objs={max_objs} in batch.")
