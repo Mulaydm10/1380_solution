@@ -95,7 +95,7 @@ from src.registry import MODELS, SCHEDULERS, build_module
 # --- Training Configuration (can be moved to config.py later) ---
 class TrainingConfig:
     num_epochs = 10
-    batch_size = 2  # Keep at 1 for now due to VRAM constraints
+    batch_size = 1  # Keep at 1 for now due to VRAM constraints
     gradient_accumulation_steps = 1  # Reduced to 1 to minimize memory
     learning_rate = 1e-5
     lr_warmup_steps = 500
@@ -138,7 +138,6 @@ def main():
         batch_size=training_config.batch_size,
         shuffle=True,
         num_workers=training_config.num_workers,
-        collate_fn=Collate() # Explicitly use our custom collate function
     )
 
     # 3. MODELS
