@@ -24,7 +24,7 @@ from src.data.collate import Collate
 from src.data.dataset import SensorGenDataset
 from src.models.stdit.control_embedder import ControlEmbedder
 from src.models.stdit.stdit3 import STDiT3, STDiT3Config
-from src.registry import MODELS, build_module
+from src.registry import MODELS, SCHEDULERS, build_module
 from src.schedulers.rf.rectified_flow import RFlowScheduler
 
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     partial_load_checkpoint(model, latest_checkpoint_path, map_location=device)
     model.eval()
 
-    scheduler = RFlowScheduler(**scheduler_config_dict)
+    scheduler = build_module(scheduler_config_dict, SCHEDULERS)
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
     embedder.eval()
