@@ -239,7 +239,8 @@ def main():
                 timesteps = t.squeeze(-1).squeeze(-1).squeeze(-1)
 
                 from src.models.stdit.control_embedder import ControlEmbedder
-                control_embedder_instance = ControlEmbedder(model.config)
+                print(f"[train.py] Instantiating ControlEmbedder with registry: {MODELS} and config: {model.config.__dict__}")
+                control_embedder_instance = ControlEmbedder(MODELS, **model.config.__dict__)
                 control_embedder_instance.to(accelerator.device)
 
                 bboxes_list = batch['bboxes_3d_data']
