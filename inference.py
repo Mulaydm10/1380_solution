@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import argparse
 import json
 import math
+import random
 import torch
 import torch.nn as nn
 from pathlib import Path
@@ -22,7 +23,7 @@ from src.data.dataset import SensorGenDataset
 from src.models.stdit.control_embedder import ControlEmbedder
 from src.models.stdit.stdit3 import STDiT3
 from src.registry import MODELS, build_module
-from src.schedulers.rf.rectified_flow import RectifiedFlowScheduler
+from src.schedulers.rf.rectified_flow import RFlowScheduler
 
 
 def partial_load_checkpoint(model, checkpoint_path):
@@ -34,7 +35,6 @@ def partial_load_checkpoint(model, checkpoint_path):
 
     for key, ckpt_value in state_dict.items():
         if key not in model_dict:
-            print(f"[INFO] Unexpected key in checkpoint (skipping): {key}")
             continue
 
         model_value = model_dict[key]
@@ -54,7 +54,7 @@ def partial_load_checkpoint(model, checkpoint_path):
     print(f"Skipped and re-initialized {len(skipped_keys)} mismatched keys: {skipped_keys}")
     return loaded_count, skipped_keys
 
-def save_gif(images, path, camera_names=None, fps=2):
+def save_gif(images, path, fps=2):
     images = (images.clamp(-1, 1) + 1) / 2
     images = images.squeeze(0)
     pil_frames = [
@@ -74,86 +74,111 @@ def save_gif(images, path, camera_names=None, fps=2):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--scene_path", type=str, default="/content/dataset/test_data_300/scene-0")
-    parser.add_argument("--output_path", type=str, default="gen_scene.gif")
+    parser.add_argument("--data_dir", type=str, default="/content/dataset/test_data_300/")
+    parser.add_argument("--output_dir", type=str, default="./inference_results")
+    parser.add_argument("--num_scenes", type=int, default=20)
     parser.add_argument("--steps", type=int, default=50)
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
 
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+
     # 1. Initialize Components
     print("--- Initializing VAE, Model, Scheduler, and Embedder ---")
     vae = build_module(vae_config_dict, MODELS).to(device, dtype)
-    vae.load_state_dict(torch.load("/content/1380-solution_github/checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors", map_location=device))
+    vae.load_state_dict(torch.load("/content/1380-solution_github/checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors", map_location=device, weights_only=False))
     vae.eval()
 
     model = STDiT3(**model_config_dict).to(device, dtype)
-    partial_load_checkpoint(model, "/content/1380-solution_github/checkpoints/ckpt/ema.pt")
+    # Dynamically find the latest checkpoint from training_checkpoints
+    training_checkpoints_dir = Path("/content/1380-solution_github/training_checkpoints")
+    epoch_dirs = [d for d in training_checkpoints_dir.iterdir() if d.is_dir() and d.name.startswith("epoch_")]
+
+    if not epoch_dirs:
+        raise FileNotFoundError(f"No epoch directories found in {training_checkpoints_dir}")
+
+    # Sort by epoch number to get the latest
+    latest_epoch_dir = sorted(epoch_dirs, key=lambda p: int(p.name.split('_')[1]))[-1]
+    latest_checkpoint_path = latest_epoch_dir / "model.safetensors"
+
+    print(f"Loading main model from latest checkpoint: {latest_checkpoint_path}")
+    partial_load_checkpoint(model, latest_checkpoint_path)
     model.eval()
 
-    scheduler = RectifiedFlowScheduler(**scheduler_config_dict)
+    scheduler = RFlowScheduler(**scheduler_config_dict)
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
     embedder.eval()
 
-    # 2. Load Scene Data using SensorGenDataset and Collate
-    print(f"--- Loading data for scene: {args.scene_path} ---")
-    scene_path = Path(args.scene_path)
-    ds = SensorGenDataset(
-        scenes=[scene_path.name],
-        data_root=scene_path.parent,
-        mode='inference',
-        num_cond_cams=4,
-        image_size=(512, 512),
-    )
-    scene_data = ds[0]
-    collate_fn = Collate()
-    batch_data = collate_fn([scene_data])
+    # 2. Get all scenes and randomly select a subset
+    all_scene_paths = [p for p in Path(args.data_dir).iterdir() if p.is_dir()]
+    random.shuffle(all_scene_paths)
+    selected_scenes = all_scene_paths[: args.num_scenes]
+    print(f"Found {len(all_scene_paths)} total scenes. Randomly selected {len(selected_scenes)} for inference.")
 
-    # Move all data to the correct device
-    for key, value in batch_data.items():
-        if isinstance(value, torch.Tensor):
-            batch_data[key] = value.to(device, dtype)
-        elif isinstance(value, dict):
-            for sub_key, sub_value in value.items():
-                if isinstance(sub_value, list):
-                     # Handle list of tensors for bboxes_3d_data
-                    batch_data[key][sub_key] = [t.to(device, dtype) for t in sub_value]
+    # 3. Main Inference Loop
+    for scene_path in tqdm(selected_scenes, desc="Processing Scenes"):
+        try:
+            print(f"\n--- Processing scene: {scene_path.name} ---")
+            # Load data for the current scene
+            ds = SensorGenDataset(
+                scenes=[scene_path.name],
+                data_root=scene_path.parent,
+                mode='inference',
+                num_cond_cams=4,
+                image_size=(512, 512),
+            )
+            scene_data = ds[0]
+            collate_fn = Collate()
+            batch_data = collate_fn([scene_data])
 
-    # 3. Generate Conditioning Embedding
-    print("--- Generating conditioning embedding ---")
-    with torch.no_grad():
-        cond_emb = embedder(
-            batch_data['bboxes_3d_data'],
-            batch_data['camera_param'],
-            bev_grid=batch_data['bev_grid'],
-        )
-    print(f"Conditioning embedding shape: {cond_emb.shape}")
+            # Move data to device
+            for key, value in batch_data.items():
+                if isinstance(value, torch.Tensor):
+                    batch_data[key] = value.to(device, dtype)
+                elif isinstance(value, dict):
+                    for sub_key, sub_value in value.items():
+                        if isinstance(sub_value, list):
+                            batch_data[key][sub_key] = [t.to(device, dtype) for t in sub_value]
 
-    # 4. Inference Pipeline
-    print(f"--- Starting inference loop for {args.steps} steps ---")
-    latents = torch.randn((1, 5, 80, 32, 32), device=device, dtype=dtype)
-    scheduler.set_timesteps(args.steps, device=device)
+            # Generate conditioning embedding
+            with torch.no_grad():
+                cond_emb = embedder(
+                    batch_data['bboxes_3d_data'],
+                    batch_data['camera_param'],
+                    bev_grid=batch_data['bev_grid'],
+                )
 
-    for i, t in enumerate(tqdm(scheduler.timesteps)):
-        with torch.no_grad():
-            t_batch = t.repeat(latents.shape[0]).to(device)
-            noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
-            latents = scheduler.step(noise_pred, t, latents).prev_sample
+            # Denoising loop
+            latents = torch.randn((1, 5, 80, 32, 32), device=device, dtype=dtype)
+            scheduler.set_timesteps(args.steps, device=device)
 
-    # 5. Decode and Save
-    print("--- Decoding latents and saving GIF ---")
-    with torch.no_grad():
-        latents = latents / vae.config.scaling_factor
-        decoded_frames = []
-        for i in range(latents.size(1)):
-            single_view_latent = latents[:, i, :, :, :].unsqueeze(2)
-            decoded_view = vae.decode(single_view_latent).sample
-            decoded_frames.append(decoded_view)
-        images = torch.cat(decoded_frames, dim=1)
+            for i, t in enumerate(scheduler.timesteps):
+                with torch.no_grad():
+                    t_batch = t.repeat(latents.shape[0]).to(device)
+                    noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
+                    latents = scheduler.step(noise_pred, t, latents).prev_sample
 
-    camera_names = ['front_middle', 'rear', 'left_backward', 'left_forward', 'right_forward']
-    save_gif(images, args.output_path, camera_names=camera_names)
+            # Decode and save
+            with torch.no_grad():
+                latents = latents / vae.config.scaling_factor
+                decoded_frames = []
+                for i in range(latents.size(1)):
+                    single_view_latent = latents[:, i, :, :, :].unsqueeze(2)
+                    decoded_view = vae.decode(single_view_latent).sample
+                    decoded_frames.append(decoded_view)
+                images = torch.cat(decoded_frames, dim=1)
 
-    print(f"--- Inference Complete: {args.output_path} saved. ---")
+            output_gif_path = os.path.join(args.output_dir, f"{scene_path.name}.gif")
+            save_gif(images, output_gif_path)
+
+        except Exception as e:
+            print(f"!!! Failed to process scene {scene_path.name}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    print("--- All scenes processed. ---")
