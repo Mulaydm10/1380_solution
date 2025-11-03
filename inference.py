@@ -165,9 +165,17 @@ if __name__ == "__main__":
                 if 'bev_grid' not in batch_data:
                     raise ValueError("BEV missing – Check dataset.py raster call")
 
+                bboxes_list = [
+                    {
+                        'bboxes': batch_data['bboxes_3d_data']['bboxes']['data'][i],
+                        'classes': batch_data['bboxes_3d_data']['classes']['data'][i],
+                        'masks': batch_data['bboxes_3d_data']['masks']['data'][i],
+                    }
+                    for i in range(len(batch_data['ride_id']))
+                ]
                 print(f"[Inference] bboxes_list being passed to embedder: {bboxes_list}")
                 cond_emb = embedder(
-                    {'bboxes': bboxes_list},
+                    bboxes_list,
                     batch_data['camera_param'],
                     bev_grid=batch_data['bev_grid'],
                 )
