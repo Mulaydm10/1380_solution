@@ -159,7 +159,7 @@ from diffusers import DDPMScheduler
 
 # ... (rest of the imports)
 
-# Scheduler: Clean DDPM config (RF bleed ignored)
+    # Scheduler: Clean DDPM config (RF bleed ignored)
 ddpm_config = {
     'num_train_timesteps': 1000,
     'beta_schedule': 'squaredcos_cap_v2',  # Smooth betas for stable diffusion
@@ -169,10 +169,10 @@ ddpm_config = {
     'clip_sample': True,  # Clip noise for stability
     'thresholding': False,  # No threshold
 }
-scheduler = DDPMScheduler(**ddpm_config)
+scheduler = DDPMScheduler(**ddpm_config).to(device)
 
 # Set steps for loop (tune 8-50)
-scheduler.set_timesteps(20, device=device)  # Low for fast test; high for quality
+scheduler.set_timesteps(args.steps, device=device)  # Low for fast test; high for quality
 
 # ... (the rest of the script)
 
@@ -244,10 +244,7 @@ for scene_path in tqdm(selected_scenes, desc="Processing Scenes"):
 
         # Denoising loop
         latents = torch.randn((1, 16, 80, 32, 32), device=device, dtype=dtype)
-        scheduler.num_timesteps = args.steps
-        timesteps = torch.linspace(1, 0, scheduler.num_timesteps, device=device)
-
-        for i, t in enumerate(timesteps):
+        for i, t in enumerate(scheduler.timesteps):
             with torch.no_grad():
                 t_batch = t.repeat(latents.shape[0]).to(device)
                 print(f"[DEBUG] Shape of latents: {latents.shape}")
@@ -255,7 +252,7 @@ for scene_path in tqdm(selected_scenes, desc="Processing Scenes"):
                 print(f"[DEBUG] Model config input_size: {model.config.input_size}")
                 noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
                 latents = scheduler.step(noise_pred, t, latents).prev_sample
-
+            print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
         # Decode and save
         with torch.no_grad():
             vae.to(device)
