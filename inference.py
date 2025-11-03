@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # Create a config object and then instantiate the model
     model_config_dict['input_size'] = (16, 80, 32, 32)
     model_config_dict['patch_size'] = (1, 2, 2)
-    model_config_dict['pos_embed_type'] = '3d'
+    model_config_dict['enable_flash_attn'] = True
     config = STDiT3Config(**model_config_dict)
     model = STDiT3(config).to(device, dtype)
     # Dynamically find the latest checkpoint from training_checkpoints
