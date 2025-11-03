@@ -244,11 +244,12 @@ def main():
                 control_embedder_instance.to(accelerator.device)
 
 
-                cond_emb = control_embedder_instance(
-                    bboxes_dict=batch['bboxes_3d_data'],
-                    camera_params=batch['camera_param'],
-                    bev_grid=batch['bev_grid']
-                )
+            bboxes_list = batch['bboxes_3d_data']
+            cond_emb = control_embedder_instance(
+                bboxes_list,
+                batch['camera_param'],
+                batch['bev_grid']
+            )
 
                 # Forward pass
                 predicted_noise = model(
