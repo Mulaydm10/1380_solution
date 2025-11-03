@@ -150,12 +150,9 @@ if __name__ == "__main__":
                     'masks': [scene_data['bboxes_3d_data']['masks']],
                 },
                 'camera_param': torch.as_tensor(scene_data['camera_param']).unsqueeze(0),
-                'bev_grid': torch.as_tensor(scene_data['bev_grid']).unsqueeze(0), # Add batch dim
+                'bev_grid': torch.as_tensor(scene_data['bev_grid']).unsqueeze(0),
                 'ride_id': [scene_data['ride_id']],
             }
-
-            # The tensorize function is no longer needed as we are not using the custom collate
-            # and the dataset already returns numpy arrays which the embedder can handle.
 
             # Move data to device
             for key, value in batch_data.items():
@@ -168,27 +165,27 @@ if __name__ == "__main__":
 
             # Generate conditioning embedding
             with torch.no_grad():
-                # Direct pass: Collate b=1 padded dict = full {'bboxes': sub-pad, 'classes': sub-pad, 'masks': sub-pad}
-                # .get('bboxes', []) = sub-dict → classes_per_scene non-empty from data/mask
                 cond_emb = embedder(
-                    batch_data['bboxes_3d_data'],  # Full padded dict – mirrors train.py
+                    batch_data['bboxes_3d_data'],
                     batch_data['camera_param'],
                     bev_grid=batch_data['bev_grid'],
                 )
                 print(f"[Inference] Cond emb shape: {cond_emb.shape} – Full (bbox+class+mask+bev tokens)")
-                # This check is conceptual, as bboxes_per_scene is internal to ControlEmbedder.forward
-                # print(f"[Inference] Classes per scene len: {len([c for c in bboxes_per_scene if len(c.get('classes', [])) > 0])} – Non-empty check")
+
+            # Denoising loop
             latents = torch.randn((1, 16, 80, 32, 32), device=device, dtype=dtype)
+            scheduler.num_timesteps = args.steps
             timesteps = torch.linspace(1, 0, scheduler.num_timesteps, device=device)
-                        for i, t in enumerate(timesteps):
-                            with torch.no_grad():
-                                t_batch = t.repeat(latents.shape[0]).to(device)
-                                
-                                print(f"[DEBUG] Shape of latents: {latents.shape}")
-                                print(f"[DEBUG] Shape of cond_emb: {cond_emb.shape}")
-                                print(f"[DEBUG] Model config input_size: {model.config.input_size}")
-                                noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
-                                latents = scheduler.step(noise_pred, t, latents).prev_sample
+
+            for i, t in enumerate(timesteps):
+                with torch.no_grad():
+                    t_batch = t.repeat(latents.shape[0]).to(device)
+                    print(f"[DEBUG] Shape of latents: {latents.shape}")
+                    print(f"[DEBUG] Shape of cond_emb: {cond_emb.shape}")
+                    print(f"[DEBUG] Model config input_size: {model.config.input_size}")
+                    noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
+                    latents = scheduler.step(noise_pred, t, latents).prev_sample
+
             # Decode and save
             with torch.no_grad():
                 latents = latents / vae.config.scaling_factor
