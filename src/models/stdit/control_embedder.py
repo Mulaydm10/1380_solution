@@ -204,6 +204,7 @@ class CamEmbedder(nn.Module):
             self.after_proj = None
 
     def embed_cam(self, param, mask=None, **kwargs):
+        print(f"--- CamEmbedder.embed_cam START ---")
         if param.shape[1] == 4:
             param = param[:, :-1]
         (bs, C_param, emb_num) = param.shape
@@ -314,7 +315,7 @@ class ControlEmbedder(nn.Module):
         bbox_tokens = self.bbox_embedder(bboxes=bbox_data, classes=class_data, mask=attention_mask, **kwargs)
 
         # Rest (cam/bev) unchanged
-        cam_tokens = self.cam_embedder(camera_params)
+        cam_tokens, _ = self.cam_embedder.embed_cam(camera_params)
         if bev_grid is not None:
             bev_tokens = self.bev_embedder(bev_grid)
             cond_embeds = torch.cat([bbox_tokens, cam_tokens, bev_tokens], dim=1)
