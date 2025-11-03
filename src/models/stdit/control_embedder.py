@@ -206,21 +206,27 @@ class CamEmbedder(nn.Module):
     def embed_cam(self, param, mask=None, **kwargs):
         print(f"--- CamEmbedder.embed_cam START ---")
         print(f"[CamEmbedder.embed_cam] param shape: {param.shape}")
-        if param.shape[1] == 4:
-            param = param[:, :-1]
-        (B, T, _, C_param, E_param) = param.shape
-        bs = B * T
-        param = rearrange(param, "b t c d e -> (b t) c d e")
-        print(f"[CamEmbedder.embed_cam] param shape after rearrange: {param.shape}")
-        assert C_param == 3
-        if mask is not None:
-            param = torch.where((mask > 0)[:, None, None], param, self.uncond_cam[None])
-        emb = self.embedder(rearrange(param, "b c d e -> (b c) d e"))
-        print(f"[CamEmbedder.embed_cam] emb shape before rearrange: {emb.shape}")
-        emb = rearrange(emb, "(b c) d e -> b (c d e)", b=bs)
+
+        # Permute to put the dimension to be embedded last: [B, T, N_CAM, 7, 3]
+        param = param.permute(0, 1, 2, 4, 3)
+        print(f"[CamEmbedder.embed_cam] param shape after permute: {param.shape}")
+
+        # Get embeddings: [B, T, N_CAM, 7, 27]
+        emb = self.embedder(param)
+        print(f"[CamEmbedder.embed_cam] emb shape after embedder: {emb.shape}")
+
+        # Reshape for the linear layer: [B, T, N_CAM, 189] (where 189 = 7 * 27)
+        emb = rearrange(emb, 'b t n d_seven d_emb -> b t n (d_seven d_emb)')
         print(f"[CamEmbedder.embed_cam] emb shape after rearrange: {emb.shape}")
-        print(f"[CamEmbedder.embed_cam] emb shape before emb2token: {emb.shape}")
+
+        # Get tokens: [B, T, N_CAM, 1152]
         token = self.emb2token(emb)
+        print(f"[CamEmbedder.embed_cam] token shape after emb2token: {token.shape}")
+
+        # Reshape to (B, N_CAM, D): [B*T, N_CAM, 1152]
+        token = rearrange(token, 'b t n d -> (b t) n d')
+        print(f"[CamEmbedder.embed_cam] final token shape: {token.shape}")
+
         if self.after_proj:
             token = self.after_proj(token)
         return token, emb
@@ -322,7 +328,7 @@ class ControlEmbedder(nn.Module):
         bbox_tokens = self.bbox_embedder(bboxes=bbox_data, classes=class_data, mask=attention_mask, **kwargs)
 
         # Rest (cam/bev) unchanged
-        cam_tokens = self.cam_embedder.embed_cam(camera_params)[0].unsqueeze(1)
+        cam_tokens = self.cam_embedder.embed_cam(camera_params)[0]
         if bev_grid is not None:
             bev_tokens = self.bev_embedder(bev_grid)
             print(f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens {bev_tokens.shape}")
