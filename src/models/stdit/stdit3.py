@@ -218,7 +218,7 @@ class STDiT3(PreTrainedModel):
         # input size related
         self.patch_size = config.patch_size
         self.input_sq_size = config.input_sq_size
-        self.pos_embed = PositionEmbedding3D(self.hidden_size, patch_size=(1, self.patch_size[1], self.patch_size[2]))
+        self.pos_embed = PositionEmbedding3D(self.hidden_size, input_size=config.input_size, patch_size=config.patch_size)
         self.rope = RotaryEmbedding(dim=self.hidden_size // self.num_heads)
 
         # embedding
