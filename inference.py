@@ -155,12 +155,16 @@ if __name__ == "__main__":
             with torch.no_grad():
                 # No loop/rebuild – collate b=1 already pads {'bboxes_3d_data': {'bboxes': tensor, 'classes': tensor, 'masks': tensor}}
                 # With mask=1.0 for single scene (no real pad)
+                bboxes_list = [
+                    batch_data['bboxes_3d_data']['bboxes']['data'][i]
+                    for i in range(len(batch_data['ride_id']))
+                ]
+                print(f"[Inference] bboxes_list being passed to embedder: {bboxes_list}")
                 cond_emb = embedder(
-                    batch_data['bboxes_3d_data'],  # Direct padded dict – .get('bboxes', []) works (data/mask access)
+                    {'bboxes': bboxes_list},
                     batch_data['camera_param'],
                     bev_grid=batch_data['bev_grid'],
                 )
-                print(f"Cond emb shape: {cond_emb.shape} – Full cond (bbox+class+mask+bev)")
             latents = torch.randn((1, 5, 80, 32, 32), device=device, dtype=dtype)
             scheduler.set_timesteps(args.steps, device=device)
 
