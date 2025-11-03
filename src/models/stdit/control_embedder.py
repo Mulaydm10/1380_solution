@@ -271,6 +271,7 @@ class ControlEmbedder(nn.Module):
 
         cam_param = kwargs.get('cam_encoder_param', {})
         cam_param['type'] = kwargs.get('cam_encoder_cls')
+        cam_param['out_dim'] = embed_dim # Add the missing out_dim
         print(f"[ControlEmbedder.__init__] Building cam_embedder with param: {cam_param}")
         self.cam_embedder = build_from_cfg(cam_param, models_registry)
 
