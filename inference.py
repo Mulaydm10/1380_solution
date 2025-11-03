@@ -118,6 +118,10 @@ if __name__ == "__main__":
     partial_load_checkpoint(model, latest_checkpoint_path, map_location=device)
     model.eval()
 
+    print(f"[DEBUG] Post-init model.config.input_size: {model.config.input_size}")
+    print(f"[DEBUG] Post-init model.config.patch_size: {model.config.patch_size}")
+    print(f"[DEBUG] Post-init model.pos_embedder: {model.pos_embedder}")
+
     scheduler = build_module(scheduler_config_dict, SCHEDULERS)
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
