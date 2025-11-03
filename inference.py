@@ -155,14 +155,26 @@ if __name__ == "__main__":
     print(f"[DEBUG] Post-init model.config.patch_size: {model.config.patch_size}")
     print(f"[DEBUG] Post-init model.pos_embed: {model.pos_embed}")
 
-    # Clean scheduler_config_dict before building
-    if "use_timestep_transform" in scheduler_config_dict:
-        del scheduler_config_dict["use_timestep_transform"]
-    if 'transform_scale' in scheduler_config_dict:
-        del scheduler_config_dict['transform_scale']
-    if 'sample_method' in scheduler_config_dict:
-        del scheduler_config_dict['sample_method']
-    scheduler = build_module(scheduler_config_dict, SCHEDULERS)
+from diffusers import DDPMScheduler
+
+# ... (rest of the imports)
+
+# Scheduler: Clean DDPM config (RF bleed ignored)
+ddpm_config = {
+    'num_train_timesteps': 1000,
+    'beta_schedule': 'squaredcos_cap_v2',  # Smooth betas for stable diffusion
+    'prediction_type': 'epsilon',  # Noise prediction (match model)
+    'trained_betas': None,  # Use default
+    'variance_type': 'fixed_small',  # Stable variance
+    'clip_sample': True,  # Clip noise for stability
+    'thresholding': False,  # No threshold
+}
+scheduler = DDPMScheduler(**ddpm_config)
+
+# Set steps for loop (tune 8-50)
+scheduler.set_timesteps(20, device=device)  # Low for fast test; high for quality
+
+# ... (the rest of the script)
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
     embedder.eval()
