@@ -178,9 +178,7 @@ if __name__ == "__main__":
                 # This check is conceptual, as bboxes_per_scene is internal to ControlEmbedder.forward
                 # print(f"[Inference] Classes per scene len: {len([c for c in bboxes_per_scene if len(c.get('classes', [])) > 0])} – Non-empty check")
             latents = torch.randn((1, 5, 80, 32, 32), device=device, dtype=dtype)
-            scheduler.num_timesteps = args.steps
-
-            for i, t in enumerate(scheduler.timesteps):
+            timesteps = torch.linspace(1, 0, scheduler.num_timesteps, device=device)
                 with torch.no_grad():
                     t_batch = t.repeat(latents.shape[0]).to(device)
                     noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
