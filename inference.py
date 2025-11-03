@@ -28,7 +28,7 @@ from src.registry import MODELS, build_module
 from src.schedulers.rf.rectified_flow import RFlowScheduler
 
 
-def partial_load_checkpoint(model, checkpoint_path):
+def partial_load_checkpoint(model, checkpoint_path, map_location):
     print("=== Partial Checkpoint Load START ===")
     state_dict = load_file(checkpoint_path, device=map_location)
     model_dict = model.state_dict()
