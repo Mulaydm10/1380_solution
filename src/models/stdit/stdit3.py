@@ -189,6 +189,8 @@ class STDiT3Config(PretrainedConfig):
         super().__init__(**kwargs)
 
 
+from src.models.layers.pos_embed import PositionEmbedding3D
+
 class STDiT3(PreTrainedModel):
     """
     Diffusion model with a Transformer backbone - Unified NC-Free Version.
@@ -216,7 +218,7 @@ class STDiT3(PreTrainedModel):
         # input size related
         self.patch_size = config.patch_size
         self.input_sq_size = config.input_sq_size
-        self.pos_embed = PositionEmbedding2D(self.hidden_size)
+        self.pos_embed = PositionEmbedding3D(self.hidden_size, patch_size=(1, self.patch_size[1], self.patch_size[2]))
         self.rope = RotaryEmbedding(dim=self.hidden_size // self.num_heads)
 
         # embedding
@@ -322,11 +324,6 @@ class STDiT3(PreTrainedModel):
         T, H, W = self.get_dynamic_size(x)
         S = H * W
 
-        base_size = round(S**0.5)
-        resolution_sq = (Hx * Wx) ** 0.5  # height/width from x, not params
-        scale = resolution_sq / self.input_sq_size
-        pos_emb = self.pos_embed(x, H, W, scale=scale, base_size=base_size)
-
         # === get timestep embed ===
         t_emb = self.t_embedder(t, dtype=x.dtype)
         t_mlp = self.t_block(t_emb)
@@ -336,7 +333,7 @@ class STDiT3(PreTrainedModel):
 
         # === get x embed ===
         x_b = self.x_embedder(x)  # [B, N=T*S, C] unified
-        x = x_b + pos_emb  # [B, N, C]
+        x = self.pos_embed(x_b)  # [B, N, C]
 
         print(f"[STDiT3.forward] Shape of x before blocks: {x.shape}")
         print(f"[STDiT3.forward] Shape of y (encoder_hidden_states): {y.shape}")
