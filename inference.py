@@ -180,14 +180,15 @@ if __name__ == "__main__":
                 # print(f"[Inference] Classes per scene len: {len([c for c in bboxes_per_scene if len(c.get('classes', [])) > 0])} – Non-empty check")
             latents = torch.randn((1, 16, 80, 32, 32), device=device, dtype=dtype)
             timesteps = torch.linspace(1, 0, scheduler.num_timesteps, device=device)
-            for i, t in enumerate(timesteps):
-                with torch.no_grad():
-                    t_batch = t.repeat(latents.shape[0]).to(device)
-                    print(f"[DEBUG] Shape of latents: {latents.shape}")
-                print(f"[DEBUG] Shape of cond_emb: {cond_emb.shape}")
-                print(f"[DEBUG] Model config input_size: {model.config.input_size}")
-                                    noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
-                                    latents = scheduler.step(noise_pred, t, latents).prev_sample
+                        for i, t in enumerate(timesteps):
+                            with torch.no_grad():
+                                t_batch = t.repeat(latents.shape[0]).to(device)
+                                
+                                print(f"[DEBUG] Shape of latents: {latents.shape}")
+                                print(f"[DEBUG] Shape of cond_emb: {cond_emb.shape}")
+                                print(f"[DEBUG] Model config input_size: {model.config.input_size}")
+                                noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
+                                latents = scheduler.step(noise_pred, t, latents).prev_sample
             # Decode and save
             with torch.no_grad():
                 latents = latents / vae.config.scaling_factor
