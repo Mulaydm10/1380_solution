@@ -208,7 +208,8 @@ class CamEmbedder(nn.Module):
         print(f"[CamEmbedder.embed_cam] param shape: {param.shape}")
         if param.shape[1] == 4:
             param = param[:, :-1]
-        (bs, C_param, emb_num) = param.shape
+        (bs, _, C_param, emb_num) = param.shape
+        param = rearrange(param, "b t c d e -> (b t) c d e")
         assert C_param == 3
         if mask is not None:
             param = torch.where((mask > 0)[:, None, None], param, self.uncond_cam[None])
