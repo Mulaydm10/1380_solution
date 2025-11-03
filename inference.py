@@ -12,7 +12,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from src.registry import MODELS, SCHEDULERS, build_module
 from diffusers import DDPMScheduler
 from PIL import Image
 from safetensors.torch import load_file
@@ -25,6 +24,7 @@ from src.data.collate import Collate
 from src.data.dataset import SensorGenDataset
 from src.models.stdit.control_embedder import ControlEmbedder
 from src.models.stdit.stdit3 import STDiT3, STDiT3Config
+from src.registry import MODELS, SCHEDULERS, build_module
 from src.schedulers.rf.rectified_flow import RFlowScheduler
 
 # Replace RFlowScheduler with DDPMScheduler
