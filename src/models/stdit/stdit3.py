@@ -229,8 +229,7 @@ class STDiT3(PreTrainedModel):
         # base_token, should not be trainable
         self.register_buffer("base_token", torch.randn(self.hidden_size))
         # Unified control embedder
-        print("[stdit3.py] Importing ControlEmbedder...")
-    from .control_embedder import ControlEmbedder
+        from .control_embedder import ControlEmbedder
         self.control_embedder = ControlEmbedder(**config.__dict__)  # Your hybrid
 
         # base blocks
