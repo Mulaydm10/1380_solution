@@ -165,8 +165,9 @@ if __name__ == "__main__":
                 if 'bev_grid' not in batch_data:
                     raise ValueError("BEV missing – Check dataset.py raster call")
 
+                print(f"[Inference] bboxes_list being passed to embedder: {bboxes_list}")
                 cond_emb = embedder(
-                    bboxes_list,
+                    {'bboxes': bboxes_list},
                     batch_data['camera_param'],
                     bev_grid=batch_data['bev_grid'],
                 )
