@@ -99,6 +99,7 @@ if __name__ == "__main__":
     vae.eval()
 
     # Create a config object and then instantiate the model
+    model_config_dict['input_size'] = (16, 80, 32, 32)
     config = STDiT3Config(**model_config_dict)
     model = STDiT3(config).to(device, dtype)
     # Dynamically find the latest checkpoint from training_checkpoints
