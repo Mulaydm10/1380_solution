@@ -120,6 +120,7 @@ def main():
         project_dir=os.path.join(training_config.output_dir, "logs"),
     )
     if accelerator.is_main_process:
+        accelerator.init_trackers("tensorboard")
         print(f"TensorBoard logs will be saved to: {os.path.join(training_config.output_dir, 'logs')}")
     torch.backends.cuda.enable_mem_efficient_sdp(False)
 
