@@ -26,7 +26,15 @@ from src.data.dataset import SensorGenDataset
 from src.models.stdit.control_embedder import ControlEmbedder
 from src.models.stdit.stdit3 import STDiT3, STDiT3Config
 from src.registry import MODELS, SCHEDULERS, build_module
-from src.schedulers.rf.rectified_flow import RFlowScheduler
+from diffusers import DDPMScheduler
+
+# Replace RFlowScheduler with DDPMScheduler
+scheduler_config_dict['type'] = 'diffusers.DDPMScheduler'
+scheduler_config_dict['beta_schedule'] = 'squaredcos_cap_v2'
+
+
+class RFlowScheduler:
+    pass
 
 
 def partial_load_checkpoint(model, checkpoint_path, map_location):

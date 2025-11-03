@@ -12,7 +12,7 @@ accelerate==1.6.0
 opencv-python==4.10.0.84
 
 # Flash-attn last (links to torch)
-flash-attn==2.7.0
+flash-attn==2.8.3
 
 # Rest unchanged
 mmengine>=0.10.3
