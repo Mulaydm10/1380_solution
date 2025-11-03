@@ -305,10 +305,10 @@ class ControlEmbedder(nn.Module):
 
         # Extract tensors
         bbox_data = bboxes_pad['data'].squeeze(1).squeeze(1)
-        class_data = classes_pad['data'].squeeze(1).squeeze(1).float()
+        class_data = classes_pad['data'].squeeze(1).squeeze(1).long()
         attention_mask = classes_pad['mask'].squeeze(1).squeeze(1).float()
 
-        print(f"[Embedder] Padded shapes: bboxes {bbox_data.shape}, classes {class_data.shape}, mask {attention_mask.shape}")
+        print(f"[Embedder] Padded shapes to BBoxEmbedder: bboxes {bbox_data.shape} (dtype={bbox_data.dtype}), classes {class_data.shape} (dtype={class_data.dtype}), mask {attention_mask.shape} (dtype={attention_mask.dtype})")
 
         # BBoxEmbedder
         bbox_tokens = self.bbox_embedder(bboxes=bbox_data, classes=class_data, mask=attention_mask, **kwargs)
