@@ -28,10 +28,14 @@ from src.models.stdit.stdit3 import STDiT3, STDiT3Config
 from src.registry import MODELS, SCHEDULERS, build_module
 from diffusers import DDPMScheduler
 
-# Replace RFlowScheduler with DDPMScheduler
-scheduler_config_dict['type'] = 'diffusers.DDPMScheduler'
-scheduler_config_dict['beta_schedule'] = 'squaredcos_cap_v2'
-
+    # Replace RFlowScheduler with DDPMScheduler
+    scheduler_config_dict['type'] = 'diffusers.DDPMScheduler'
+    scheduler_config_dict['beta_schedule'] = 'squaredcos_cap_v2'
+    # Remove RFlowScheduler-specific arguments
+    if 'use_timestep_transform' in scheduler_config_dict:
+        del scheduler_config_dict['use_timestep_transform']
+    if 'transform_scale' in scheduler_config_dict:
+        del scheduler_config_dict['transform_scale']
 
 class RFlowScheduler:
     pass
@@ -134,6 +138,11 @@ if __name__ == "__main__":
     print(f"[DEBUG] Post-init model.config.patch_size: {model.config.patch_size}")
     print(f"[DEBUG] Post-init model.pos_embed: {model.pos_embed}")
 
+    # Clean scheduler_config_dict before building
+    if 'use_timestep_transform' in scheduler_config_dict:
+        del scheduler_config_dict['use_timestep_transform']
+    if 'transform_scale' in scheduler_config_dict:
+        del scheduler_config_dict['transform_scale']
     scheduler = build_module(scheduler_config_dict, SCHEDULERS)
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
