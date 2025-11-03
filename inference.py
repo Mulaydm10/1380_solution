@@ -23,7 +23,7 @@ from config import (
 from src.data.collate import Collate
 from src.data.dataset import SensorGenDataset
 from src.models.stdit.control_embedder import ControlEmbedder
-from src.models.stdit.stdit3 import STDiT3
+from src.models.stdit.stdit3 import STDiT3, STDiT3Config
 from src.registry import MODELS, build_module
 from src.schedulers.rf.rectified_flow import RFlowScheduler
 
