@@ -98,6 +98,9 @@ if __name__ == "__main__":
     vae.load_state_dict(vae_state_dict_with_prefix)
     vae.eval()
 
+    # Offload VAE to CPU
+    vae = vae.cpu()
+
     # Create a config object and then instantiate the model
     model_config_dict['input_size'] = (16, 80, 32, 32)
     model_config_dict['patch_size'] = (1, 2, 2)
@@ -127,6 +130,9 @@ if __name__ == "__main__":
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
     embedder.eval()
+
+    # Offload embedder to CPU
+    embedder = embedder.cpu()
 
     # 2. Get all scenes and randomly select a subset
     all_scene_paths = [p for p in Path(args.data_dir).iterdir() if p.is_dir()]

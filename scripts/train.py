@@ -118,6 +118,7 @@ def main():
         gradient_accumulation_steps=training_config.gradient_accumulation_steps,
         log_with="tensorboard",
         project_dir=os.path.join(training_config.output_dir, "logs"),
+        cpu_offload=True
     )
     if accelerator.is_main_process:
         accelerator.init_trackers("tensorboard")
@@ -165,15 +166,6 @@ def main():
 
 
 
-    # Gradient checkpointing not supported for STDiT3, skip to avoid error
-    # model.gradient_checkpointing_enable()
-
-    # Freeze VAE and move to CPU to save VRAM
-    vae.eval()
-    for param in vae.parameters():
-        param.requires_grad = False
-    vae.to("cpu")  # Keep VAE on CPU, move to GPU only when needed
-
     # 4. OPTIMIZER & SCHEDULER
     optimizer = AdamW(
         model.parameters(), lr=training_config.learning_rate, weight_decay=0.0
@@ -186,11 +178,11 @@ def main():
     )
 
     # 5. ACCELERATE PREPARE
-    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, lr_scheduler
+    model, optimizer, train_dataloader, lr_scheduler, vae = accelerator.prepare(
+        model, optimizer, train_dataloader, lr_scheduler, vae
     )
 
-    # 6. TRAINING LOOP
+    model.gradient_checkpointing_enable()
     if accelerator.is_main_process:
         print("***** Starting training *****")
         print(f"  Num examples = {len(train_dataset)}")

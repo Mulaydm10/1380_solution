@@ -1,18 +1,23 @@
-# Core torch first (CUDA/flash deps)
-torch==2.1.0+cu121
-torchvision==0.16.0+cu121
+# Core: Torch first for CUDA/flash deps (2.5.1+cu121 for 12.1 support)
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+torchaudio==2.5.1+cu121
+
+# Diffusers/transformers next
 diffusers==0.33.1
-transformers==4.39.3
+transformers==4.44.2
+
+# Accelerate/opcv
 accelerate==1.6.0
+opencv-python==4.10.0.84
 
-# Then flash-attn (now links to torch)
-flash-attn==2.5.6
+# Flash-attn last (links to torch)
+flash-attn==2.7.0
 
-# Rest as-is
+# Rest unchanged
 mmengine>=0.10.3
 timm==0.9.16
 rotary-embedding-torch==0.5.3
-opencv-python==4.10.0.84
 safetensors
 pillow
 tqdm
