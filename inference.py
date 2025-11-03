@@ -142,6 +142,22 @@ if __name__ == "__main__":
             collate_fn = Collate()
             batch_data = collate_fn([scene_data])
 
+            def tensorize_bboxes_dict(bboxes_3d_data):
+                """
+                Post-collate convert: Raw lists/str → torch tensors for embedder (inference fix).
+                """
+                for k in ['bboxes', 'classes', 'masks']:
+                    sub = bboxes_3d_data[k]
+                    if isinstance(sub['data'], (list, np.ndarray)):
+                        sub['data'] = torch.tensor(sub['data'], dtype=torch.float if 'bboxes' in k else torch.long)
+                    if isinstance(sub['mask'], (list, np.ndarray)):
+                        sub['mask'] = torch.tensor(sub['mask'], dtype=torch.bool).float()  # For attn
+                return bboxes_3d_data
+
+            batch_data['bboxes_3d_data'] = tensorize_bboxes_dict(batch_data['bboxes_3d_data'])
+            print(f"[Inference] Tensorized bboxes – Bboxes data type/shape: {type(batch_data['bboxes_3d_data']['bboxes']['data'])}, {batch_data['bboxes_3d_data']['bboxes']['data'].shape}")
+            print(f"[Inference] Classes data: {batch_data['bboxes_3d_data']['classes']['data'].shape} (non-empty: {batch_data['bboxes_3d_data']['classes']['data'].numel() > 0})")
+
             # Move data to device
             for key, value in batch_data.items():
                 if isinstance(value, torch.Tensor):
