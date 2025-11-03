@@ -268,10 +268,10 @@ class ControlEmbedder(nn.Module):
         self.models_registry = models_registry # Store the injected registry
         embed_dim = kwargs.get('hidden_size', 1152) # Get embed_dim from kwargs, default to 1152
 
-        self.cam_embedder = build_from_cfg(kwargs.pop('cam_encoder_param'), models_registry,
-                                           default_args={'_type_': kwargs.pop('cam_encoder_cls')})
-        self.bbox_embedder = build_from_cfg(kwargs.pop('bbox_embedder_param'), models_registry,
-                                            default_args={'_type_': kwargs.pop('bbox_embedder_cls')})
+        self.cam_embedder = build_from_cfg(kwargs.get('cam_encoder_param'), models_registry,
+                                           default_args={'_type_': kwargs.get('cam_encoder_cls')})
+        self.bbox_embedder = build_from_cfg(kwargs.get('bbox_embedder_param'), models_registry,
+                                            default_args={'_type_': kwargs.get('bbox_embedder_cls')})
         self.bev_embedder = BEVEmbedder(embed_dim=embed_dim) # Pass embed_dim
 
 
