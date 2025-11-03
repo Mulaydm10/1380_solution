@@ -148,8 +148,8 @@ if __name__ == "__main__":
                     'classes': [scene_data['bboxes_3d_data']['classes']],
                     'masks': [scene_data['bboxes_3d_data']['masks']],
                 },
-                'camera_param': torch.from_numpy(scene_data['camera_param']),
-                'bev_grid': torch.from_numpy(scene_data['bev_grid']).unsqueeze(0), # Add batch dim
+                'camera_param': torch.as_tensor(scene_data['camera_param']),
+                'bev_grid': torch.as_tensor(scene_data['bev_grid']).unsqueeze(0), # Add batch dim
                 'ride_id': [scene_data['ride_id']],
             }
 
