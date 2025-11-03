@@ -25,21 +25,21 @@ from src.data.collate import Collate
 from src.data.dataset import SensorGenDataset
 from src.models.stdit.control_embedder import ControlEmbedder
 from src.models.stdit.stdit3 import STDiT3, STDiT3Config
-from src.registry import MODELS, SCHEDULERS, build_module
 from diffusers import DDPMScheduler
+from src.schedulers.rf.rectified_flow import RFlowScheduler
 
-    # Replace RFlowScheduler with DDPMScheduler
-    scheduler_config_dict['type'] = 'diffusers.DDPMScheduler'
-    scheduler_config_dict['beta_schedule'] = 'squaredcos_cap_v2'
-    # Remove RFlowScheduler-specific arguments
-    if 'use_timestep_transform' in scheduler_config_dict:
-        del scheduler_config_dict['use_timestep_transform']
-    if 'transform_scale' in scheduler_config_dict:
-        del scheduler_config_dict['transform_scale']
+# Replace RFlowScheduler with DDPMScheduler
+scheduler_config_dict['type'] = 'diffusers.DDPMScheduler'
+scheduler_config_dict['beta_schedule'] = 'squaredcos_cap_v2'
+
+# Remove RFlowScheduler-specific arguments
+if 'use_timestep_transform' in scheduler_config_dict:
+    del scheduler_config_dict['use_timestep_transform']
+if 'transform_scale' in scheduler_config_dict:
+    del scheduler_config_dict['transform_scale']
 
 class RFlowScheduler:
     pass
-
 
 def partial_load_checkpoint(model, checkpoint_path, map_location):
     print("=== Partial Checkpoint Load START ===")
