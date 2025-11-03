@@ -153,32 +153,14 @@ if __name__ == "__main__":
 
             # Generate conditioning embedding
             with torch.no_grad():
-                bboxes_list = [
-                    {
-                        'bboxes': batch_data['bboxes_3d_data']['bboxes']['data'][i],
-                        'classes': batch_data['bboxes_3d_data']['classes']['data'][i],
-                        'masks': batch_data['bboxes_3d_data']['masks']['data'][i],
-                    }
-                    for i in range(len(batch_data['ride_id']))
-                ]
-
-                if 'bev_grid' not in batch_data:
-                    raise ValueError("BEV missing – Check dataset.py raster call")
-
-                bboxes_list = [
-                    {
-                        'bboxes': batch_data['bboxes_3d_data']['bboxes']['data'][i],
-                        'classes': batch_data['bboxes_3d_data']['classes']['data'][i],
-                        'masks': batch_data['bboxes_3d_data']['masks']['data'][i],
-                    }
-                    for i in range(len(batch_data['ride_id']))
-                ]
-                print(f"[Inference] bboxes_list being passed to embedder: {bboxes_list}")
+                # No loop/rebuild – collate b=1 already pads {'bboxes_3d_data': {'bboxes': tensor, 'classes': tensor, 'masks': tensor}}
+                # With mask=1.0 for single scene (no real pad)
                 cond_emb = embedder(
-                    {'bboxes': bboxes_list},
+                    batch_data['bboxes_3d_data'],  # Direct padded dict – .get('bboxes', []) works (data/mask access)
                     batch_data['camera_param'],
                     bev_grid=batch_data['bev_grid'],
                 )
+                print(f"Cond emb shape: {cond_emb.shape} – Full cond (bbox+class+mask+bev)")
             latents = torch.randn((1, 5, 80, 32, 32), device=device, dtype=dtype)
             scheduler.set_timesteps(args.steps, device=device)
 
