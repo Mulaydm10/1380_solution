@@ -153,14 +153,21 @@ if __name__ == "__main__":
 
             # Generate conditioning embedding
             with torch.no_grad():
-                            if 'bev_grid' not in batch_data:
-                                raise ValueError("BEV missing – Check dataset.py raster call")
-                            cond_emb = embedder(
-                                batch_data['bboxes_3d_data'],
-                                batch_data['camera_param'],
-                                bev_grid=batch_data['bev_grid'],
-                            )
-            # Denoising loop
+                                        bboxes_list = [
+                                            {
+                                                'bboxes': batch_data['bboxes_3d_data']['bboxes'][i],
+                                                'classes': batch_data['bboxes_3d_data']['classes'][i],
+                                                'masks': batch_data['bboxes_3d_data']['masks'][i],
+                                            }
+                                            for i in range(len(batch_data['ride_id']))
+                                        ]
+                                        if 'bev_grid' not in batch_data:
+                                            raise ValueError("BEV missing – Check dataset.py raster call")
+                                        cond_emb = embedder(
+                                            bboxes_list,
+                                            batch_data['camera_param'],
+                                            bev_grid=batch_data['bev_grid'],
+                                        )            # Denoising loop
             latents = torch.randn((1, 5, 80, 32, 32), device=device, dtype=dtype)
             scheduler.set_timesteps(args.steps, device=device)
 
