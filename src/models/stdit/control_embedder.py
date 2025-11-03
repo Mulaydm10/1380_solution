@@ -322,11 +322,12 @@ class ControlEmbedder(nn.Module):
 
         # Rest (cam/bev) unchanged
         cam_tokens = self.cam_embedder.embed_cam(camera_params)[0].unsqueeze(1)
-        print(f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens {bev_tokens.shape if bev_grid is not None else 'None'}")
         if bev_grid is not None:
             bev_tokens = self.bev_embedder(bev_grid)
+            print(f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens {bev_tokens.shape}")
             cond_embeds = torch.cat([bbox_tokens, cam_tokens, bev_tokens], dim=1)
         else:
+            print(f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens None")
             cond_embeds = torch.cat([bbox_tokens, cam_tokens], dim=1)
 
         print(f"[Embedder] Final cond_embeds: {cond_embeds.shape}")
