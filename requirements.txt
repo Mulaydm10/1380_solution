@@ -6,6 +6,14 @@ transformers==4.39.3
 accelerate
 wandb
 tensorboard
+flash-attn
+torch
+tqdm
+einops
+rotary_embedding_torch
+timm
+transformers
 safetensors
+pillow
 opencv-python==4.10.0.84
 scipy
