@@ -177,11 +177,13 @@ if __name__ == "__main__":
 
             # Generate conditioning embedding
             with torch.no_grad():
+                embedder.to(device)
                 cond_emb = embedder(
                     batch_data['bboxes_3d_data'],
                     batch_data['camera_param'],
                     bev_grid=batch_data['bev_grid'],
                 )
+                embedder.cpu()
                 print(f"[Inference] Cond emb shape: {cond_emb.shape} – Full (bbox+class+mask+bev tokens)")
 
             # Denoising loop
@@ -200,6 +202,7 @@ if __name__ == "__main__":
 
             # Decode and save
             with torch.no_grad():
+                vae.to(device)
                 latents = latents / vae.config.scaling_factor
                 decoded_frames = []
                 for i in range(latents.size(1)):
@@ -207,6 +210,7 @@ if __name__ == "__main__":
                     decoded_view = vae.decode(single_view_latent).sample
                     decoded_frames.append(decoded_view)
                 images = torch.cat(decoded_frames, dim=1)
+                vae.cpu()
 
             output_gif_path = os.path.join(args.output_dir, f"{scene_path.name}.gif")
             save_gif(images, output_gif_path)
