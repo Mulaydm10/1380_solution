@@ -216,7 +216,7 @@ class CamEmbedder(nn.Module):
             param = torch.where((mask > 0)[:, None, None], param, self.uncond_cam[None])
         emb = self.embedder(rearrange(param, "b c d e -> (b c) d e"))
         print(f"[CamEmbedder.embed_cam] emb shape before rearrange: {emb.shape}")
-        emb = rearrange(emb, "b c d -> b (c d)", b=bs)
+        emb = rearrange(emb, "b c d -> b (c d)")
         print(f"[CamEmbedder.embed_cam] emb shape after rearrange: {emb.shape}")
         print(f"[CamEmbedder.embed_cam] emb shape before emb2token: {emb.shape}")
         token = self.emb2token(emb)
