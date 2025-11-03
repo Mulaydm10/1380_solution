@@ -13,6 +13,8 @@ from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
 
+from safetensors.torch import load_file
+
 from config import (
     model as model_config_dict,
     scheduler as scheduler_config_dict,
@@ -89,7 +91,8 @@ if __name__ == "__main__":
     # 1. Initialize Components
     print("--- Initializing VAE, Model, Scheduler, and Embedder ---")
     vae = build_module(vae_config_dict, MODELS).to(device, dtype)
-    vae.load_state_dict(torch.load("/content/1380-solution_github/checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors", map_location=device, weights_only=False))
+    vae_state_dict = load_file("/content/1380-solution_github/checkpoints/CogVideoX-2b/vae/diffusion_pytorch_model.safetensors", device=device)
+    vae.load_state_dict(vae_state_dict)
     vae.eval()
 
     model = STDiT3(**model_config_dict).to(device, dtype)
