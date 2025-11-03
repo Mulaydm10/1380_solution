@@ -186,9 +186,8 @@ if __name__ == "__main__":
                     print(f"[DEBUG] Shape of latents: {latents.shape}")
                 print(f"[DEBUG] Shape of cond_emb: {cond_emb.shape}")
                 print(f"[DEBUG] Model config input_size: {model.config.input_size}")
-                noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
-                    latents = scheduler.step(noise_pred, t, latents).prev_sample
-
+                                    noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
+                                    latents = scheduler.step(noise_pred, t, latents).prev_sample
             # Decode and save
             with torch.no_grad():
                 latents = latents / vae.config.scaling_factor
