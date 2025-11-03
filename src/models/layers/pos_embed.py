@@ -28,5 +28,5 @@ class PositionEmbedding3D(nn.Module):
 
     def forward(self, x):
         seq_len = x.shape[1]
-        pos_emb = self.pos_embed[:, :seq_len, :].to(x.device)
+        pos_emb = self.pos_embed[:, :seq_len, :].to(x.device, dtype=x.dtype)
         return x + pos_emb
