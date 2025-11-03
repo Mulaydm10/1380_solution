@@ -208,7 +208,8 @@ class CamEmbedder(nn.Module):
         print(f"[CamEmbedder.embed_cam] param shape: {param.shape}")
         if param.shape[1] == 4:
             param = param[:, :-1]
-        (bs, _, _, C_param, emb_num) = param.shape
+        (B, T, C_param, D_param, E_param) = param.shape
+        bs = B * T
         param = rearrange(param, "b t c d e -> (b t) c d e")
         print(f"[CamEmbedder.embed_cam] param shape after rearrange: {param.shape}")
         assert C_param == 3
@@ -216,7 +217,7 @@ class CamEmbedder(nn.Module):
             param = torch.where((mask > 0)[:, None, None], param, self.uncond_cam[None])
         emb = self.embedder(rearrange(param, "b c d e -> (b c) d e"))
         print(f"[CamEmbedder.embed_cam] emb shape before rearrange: {emb.shape}")
-        emb = rearrange(emb, "b c d -> b (c d)")
+        emb = rearrange(emb, "(b c) d -> b (c d)", b=bs)
         print(f"[CamEmbedder.embed_cam] emb shape after rearrange: {emb.shape}")
         print(f"[CamEmbedder.embed_cam] emb shape before emb2token: {emb.shape}")
         token = self.emb2token(emb)
