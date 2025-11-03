@@ -155,16 +155,18 @@ if __name__ == "__main__":
             with torch.no_grad():
                 # No loop/rebuild – collate b=1 already pads {'bboxes_3d_data': {'bboxes': tensor, 'classes': tensor, 'masks': tensor}}
                 # With mask=1.0 for single scene (no real pad)
-                bboxes_list = [
-                    batch_data['bboxes_3d_data']['bboxes']['data'][i]
-                    for i in range(len(batch_data['ride_id']))
-                ]
-                print(f"[Inference] bboxes_list being passed to embedder: {bboxes_list}")
+            # Generate conditioning embedding
+            with torch.no_grad():
+                # Direct pass: Collate b=1 padded dict = full {'bboxes': sub-pad, 'classes': sub-pad, 'masks': sub-pad}
+                # .get('bboxes', []) = sub-dict → classes_per_scene non-empty from data/mask
                 cond_emb = embedder(
-                    {'bboxes': bboxes_list},
+                    batch_data['bboxes_3d_data'],  # Full padded dict – mirrors train.py
                     batch_data['camera_param'],
                     bev_grid=batch_data['bev_grid'],
                 )
+                print(f"[Inference] Cond emb shape: {cond_emb.shape} – Full (bbox+class+mask+bev tokens)")
+                # This check is conceptual, as bboxes_per_scene is internal to ControlEmbedder.forward
+                # print(f"[Inference] Classes per scene len: {len([c for c in bboxes_per_scene if len(c.get('classes', [])) > 0])} – Non-empty check")
             latents = torch.randn((1, 5, 80, 32, 32), device=device, dtype=dtype)
             scheduler.set_timesteps(args.steps, device=device)
 
