@@ -147,19 +147,11 @@ if __name__ == "__main__":
     latest_epoch_dir = sorted(epoch_dirs, key=lambda p: int(p.name.split("_")[1]))[-1]
     latest_checkpoint_path = latest_epoch_dir / "model.safetensors"
 
-    print(f"Loading main model from latest checkpoint: {latest_checkpoint_path}")
     partial_load_checkpoint(model, latest_checkpoint_path, map_location=device)
     model.eval()
 
-    print(f"[DEBUG] Post-init model.config.input_size: {model.config.input_size}")
-    print(f"[DEBUG] Post-init model.config.patch_size: {model.config.patch_size}")
-    print(f"[DEBUG] Post-init model.pos_embed: {model.pos_embed}")
 
-from diffusers import DDPMScheduler
-
-# ... (rest of the imports)
-
-    # Scheduler: Clean DDPM config (RF bleed ignored)
+# Scheduler: Clean DDPM config (RF bleed ignored)
 ddpm_config = {
     'num_train_timesteps': 1000,
     'beta_schedule': 'squaredcos_cap_v2',  # Smooth betas for stable diffusion
@@ -174,105 +166,103 @@ scheduler = DDPMScheduler(**ddpm_config)
 # Set steps for loop (tune 8-50)
 scheduler.set_timesteps(args.steps, device=device)  # Low for fast test; high for quality
 
-# ... (the rest of the script)
+# Initialize components inside main block
+if __name__ == "__main__":
+    # 2. Get all scenes and randomly select a subset
+    all_scene_paths = [p for p in Path(args.data_dir).iterdir() if p.is_dir()]
+    random.shuffle(all_scene_paths)
+    selected_scenes = all_scene_paths[: args.num_scenes]
+    print(
+        f"Found {len(all_scene_paths)} total scenes. Randomly selected {len(selected_scenes)} for inference."
+    )
 
-embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
-embedder.eval()
+    # 3. Initialize embedder
+    embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
+    embedder.eval()
 
-# Offload embedder to CPU
-embedder = embedder.cpu()
+    # Offload embedder to CPU
+    embedder = embedder.cpu()
 
-# 2. Get all scenes and randomly select a subset
-all_scene_paths = [p for p in Path(args.data_dir).iterdir() if p.is_dir()]
-random.shuffle(all_scene_paths)
-selected_scenes = all_scene_paths[: args.num_scenes]
-print(
-    f"Found {len(all_scene_paths)} total scenes. Randomly selected {len(selected_scenes)} for inference."
-)
-
-# 3. Main Inference Loop
-for scene_path in tqdm(selected_scenes, desc="Processing Scenes"):
-    try:
-        print(f"\n--- Processing scene: {scene_path.name} ---")
-        # Load data for the current scene
-        ds = SensorGenDataset(
-            scenes=[scene_path.name],
-            data_root=scene_path.parent,
-            mode="inference",
-            num_cond_cams=4,
-            image_size=(512, 512),
-        )
-        scene_data = ds[0]
-
-        # Manually create batch to mimic default collate used in train.py
-        batch_data = {
-            "bboxes_3d_data": {
-                "bboxes": [scene_data["bboxes_3d_data"]["bboxes"]],
-                "classes": [scene_data["bboxes_3d_data"]["classes"]],
-                "masks": [scene_data["bboxes_3d_data"]["masks"]],
-            },
-            "camera_param": torch.as_tensor(scene_data["camera_param"]).unsqueeze(
-                0
-            ),
-            "bev_grid": torch.as_tensor(scene_data["bev_grid"]).unsqueeze(0),
-            "ride_id": [scene_data["ride_id"]],
-        }
-
-        # Move data to device
-        for key, value in batch_data.items():
-            if isinstance(value, torch.Tensor):
-                batch_data[key] = value.to(device, dtype)
-            elif isinstance(value, dict):
-                for sub_key, sub_value in value.items():
-                    if isinstance(sub_value, list):
-                        batch_data[key][sub_key] = [
-                            torch.as_tensor(t).to(device, dtype) for t in sub_value
-                        ]
-
-        # Generate conditioning embedding
-        with torch.no_grad():
-            embedder.to(device)
-            cond_emb = embedder(
-                batch_data["bboxes_3d_data"],
-                batch_data["camera_param"],
-                bev_grid=batch_data["bev_grid"],
+    # 4. Main Inference Loop
+    for scene_path in tqdm(selected_scenes, desc="Processing Scenes"):
+        try:
+            print(f"\n--- Processing scene: {scene_path.name} ---")
+            # Load data for the current scene
+            ds = SensorGenDataset(
+                scenes=[scene_path.name],
+                data_root=scene_path.parent,
+                mode="inference",
+                num_cond_cams=4,
+                image_size=(512, 512),
             )
-            embedder.cpu()
-            print(
-                f"[Inference] Cond emb shape: {cond_emb.shape} – Full (bbox+class+mask+bev tokens)"
-            )
+            scene_data = ds[0]
 
-        # Denoising loop
-        latents = torch.randn((1, 16, 80, 32, 32), device=device, dtype=dtype)
-        for i, t in enumerate(scheduler.timesteps):
+            # Manually create batch to mimic default collate used in train.py
+            batch_data = {
+                "bboxes_3d_data": {
+                    "bboxes": [scene_data["bboxes_3d_data"]["bboxes"]],
+                    "classes": [scene_data["bboxes_3d_data"]["classes"]],
+                    "masks": [scene_data["bboxes_3d_data"]["masks"]],
+                },
+                "camera_param": torch.as_tensor(scene_data["camera_param"]).unsqueeze(
+                    0
+                ),
+                "bev_grid": torch.as_tensor(scene_data["bev_grid"]).unsqueeze(0),
+                "ride_id": [scene_data["ride_id"]],
+            }
+
+            # Move data to device
+            for key, value in batch_data.items():
+                if isinstance(value, torch.Tensor):
+                    batch_data[key] = value.to(device, dtype)
+                elif isinstance(value, dict):
+                    for sub_key, sub_value in value.items():
+                        if isinstance(sub_value, list):
+                            batch_data[key][sub_key] = [
+                                torch.as_tensor(t).to(device, dtype) for t in sub_value
+                            ]
+
+            # Generate conditioning embedding
             with torch.no_grad():
-                t_batch = t.repeat(latents.shape[0]).to(device)
-                print(f"[DEBUG] Shape of latents: {latents.shape}")
-                print(f"[DEBUG] Shape of cond_emb: {cond_emb.shape}")
-                print(f"[DEBUG] Model config input_size: {model.config.input_size}")
-                noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
-                latents = scheduler.step(noise_pred, t, latents).prev_sample
-            print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
-        # Decode and save
-        with torch.no_grad():
-            vae.to(device)
-            latents = latents / vae.config.scaling_factor
-            decoded_frames = []
-            for i in range(latents.size(1)):
-                single_view_latent = latents[:, i, :, :, :].unsqueeze(2)
-                decoded_view = vae.decode(single_view_latent).sample
-                decoded_frames.append(decoded_view)
-            images = torch.cat(decoded_frames, dim=1)
-            vae.cpu()
+                embedder.to(device)
+                cond_emb = embedder(
+                    batch_data["bboxes_3d_data"],
+                    batch_data["camera_param"],
+                    bev_grid=batch_data["bev_grid"],
+                )
+                embedder.cpu()
+                print(
+                )
 
-        output_gif_path = os.path.join(args.output_dir, f"{scene_path.name}.gif")
-        save_gif(images, output_gif_path)
+            # Denoising loop
+            latents = torch.randn((1, 16, 80, 32, 32), device=device, dtype=dtype)
+            for i, t in enumerate(scheduler.timesteps):
+                with torch.no_grad():
+                    t_batch = t.repeat(latents.shape[0]).to(device)
+                    noise_pred = model(latents, t_batch, encoder_hidden_states=cond_emb)
+                    latents = scheduler.step(noise_pred, t, latents).prev_sample
+                print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
 
-    except Exception as e:
-        print(f"!!! Failed to process scene {scene_path.name}: {e}")
-        import traceback
+            # Decode and save
+            with torch.no_grad():
+                vae.to(device)
+                latents = latents / vae.scaling_factor
+                decoded_frames = []
+                for i in range(latents.size(1)):
+                    single_view_latent = latents[:, i, :, :, :].unsqueeze(2)
+                    decoded_view = vae.decode(single_view_latent).sample
+                    decoded_frames.append(decoded_view)
+                images = torch.cat(decoded_frames, dim=1)
+                vae.cpu()
 
-        traceback.print_exc()
-        continue
+            output_gif_path = os.path.join(args.output_dir, f"{scene_path.name}.gif")
+            save_gif(images, output_gif_path)
+
+        except Exception as e:
+            print(f"!!! Failed to process scene {scene_path.name}: {e}")
+            import traceback
+
+            traceback.print_exc()
+            continue
 
     print("--- All scenes processed. ---")
