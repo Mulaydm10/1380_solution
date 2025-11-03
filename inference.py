@@ -97,7 +97,9 @@ if __name__ == "__main__":
     vae.load_state_dict(vae_state_dict_with_prefix)
     vae.eval()
 
-    model = STDiT3(**model_config_dict).to(device, dtype)
+    model_config = model_config_dict.copy()
+    model_type = model_config.pop('type') # Extract type, don't pass as arg
+    model = STDiT3(**model_config).to(device, dtype)
     # Dynamically find the latest checkpoint from training_checkpoints
     training_checkpoints_dir = Path("/content/1380-solution_github/training_checkpoints")
     epoch_dirs = [d for d in training_checkpoints_dir.iterdir() if d.is_dir() and d.name.startswith("epoch_")]
