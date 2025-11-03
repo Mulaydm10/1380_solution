@@ -158,8 +158,10 @@ if __name__ == "__main__":
     # Clean scheduler_config_dict before building
     if "use_timestep_transform" in scheduler_config_dict:
         del scheduler_config_dict["use_timestep_transform"]
-    if "transform_scale" in scheduler_config_dict:
-        del scheduler_config_dict["transform_scale"]
+    if 'transform_scale' in scheduler_config_dict:
+        del scheduler_config_dict['transform_scale']
+    if 'sample_method' in scheduler_config_dict:
+        del scheduler_config_dict['sample_method']
     scheduler = build_module(scheduler_config_dict, SCHEDULERS)
 
     embedder = ControlEmbedder(MODELS, **model.config.__dict__).to(device, dtype)
