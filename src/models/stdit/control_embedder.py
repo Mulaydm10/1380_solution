@@ -6,7 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from mmengine.registry import build_from_cfg
-from src.registry import REGISTRY, repeat
+from src.registry import REGISTRY
+from einops import repeat
 
 from .utils import zero_module
 
