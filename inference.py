@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     print(f"[DEBUG] Post-init model.config.input_size: {model.config.input_size}")
     print(f"[DEBUG] Post-init model.config.patch_size: {model.config.patch_size}")
-    print(f"[DEBUG] Post-init model.pos_embedder: {model.pos_embedder}")
+    print(f"[DEBUG] Post-init model.pos_embed: {model.pos_embed}")
 
     scheduler = build_module(scheduler_config_dict, SCHEDULERS)
 
