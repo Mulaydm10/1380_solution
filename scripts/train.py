@@ -147,6 +147,8 @@ def main():
     model_config_dict['in_channels'] = 80
     if accelerator.is_main_process:
         print(f"[Model Build] Overriding model config. New config: {model_config_dict}")
+    if accelerator.is_main_process:
+        print(f"[train.py] Initial model_config_dict: {model_config_dict}")
     print("[train.py] About to build model...")
     model = build_module(model_config_dict, MODELS)
     print("[train.py] Model built successfully.")

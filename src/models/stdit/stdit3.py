@@ -231,6 +231,7 @@ class STDiT3(PreTrainedModel):
         # Unified control embedder
     
         from .control_embedder import ControlEmbedder
+        print(f"[STDiT3.__init__] Passing config to ControlEmbedder: {config.__dict__}")
         self.control_embedder = ControlEmbedder(MODELS, **config.__dict__)
 
         # base blocks

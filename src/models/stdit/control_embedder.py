@@ -265,6 +265,7 @@ def general_ragged_pad(list_of_tensors, pad_value=0.0):
 class ControlEmbedder(nn.Module):
     def __init__(self, models_registry, **kwargs):
         super().__init__()
+        print(f"[ControlEmbedder.__init__] Received kwargs: {kwargs}")
         self.models_registry = models_registry # Store the injected registry
         embed_dim = kwargs.get('hidden_size', 1152) # Get embed_dim from kwargs, default to 1152
 
