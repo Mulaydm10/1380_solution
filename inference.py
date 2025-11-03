@@ -163,7 +163,7 @@ if __name__ == "__main__":
                 elif isinstance(value, dict):
                     for sub_key, sub_value in value.items():
                         if isinstance(sub_value, list):
-                            batch_data[key][sub_key] = [t.to(device, dtype) for t in sub_value]
+                            batch_data[key][sub_key] = [torch.as_tensor(t).to(device, dtype) for t in sub_value]
 
             # Generate conditioning embedding
             with torch.no_grad():
