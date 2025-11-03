@@ -4,7 +4,9 @@ import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
+from einops import rearrange
+from mmengine.registry import build_from_cfg
+from src.registry import REGISTRY, repeat
 
 from .utils import zero_module
 
