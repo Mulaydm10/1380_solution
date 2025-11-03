@@ -30,7 +30,7 @@ from src.schedulers.rf.rectified_flow import RFlowScheduler
 
 def partial_load_checkpoint(model, checkpoint_path):
     print("=== Partial Checkpoint Load START ===")
-    state_dict = torch.load(checkpoint_path, map_location='cpu')
+    state_dict = load_file(checkpoint_path, device=map_location)
     model_dict = model.state_dict()
     loaded_count = 0
     skipped_keys = []
