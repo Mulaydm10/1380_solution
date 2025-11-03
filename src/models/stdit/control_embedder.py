@@ -205,6 +205,7 @@ class CamEmbedder(nn.Module):
 
     def embed_cam(self, param, mask=None, **kwargs):
         print(f"--- CamEmbedder.embed_cam START ---")
+        print(f"[CamEmbedder.embed_cam] param shape: {param.shape}")
         if param.shape[1] == 4:
             param = param[:, :-1]
         (bs, C_param, emb_num) = param.shape
