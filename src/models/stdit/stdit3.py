@@ -230,7 +230,7 @@ class STDiT3(PreTrainedModel):
         self.register_buffer("base_token", torch.randn(self.hidden_size))
         # Unified control embedder
         from .control_embedder import ControlEmbedder
-        self.control_embedder = ControlEmbedder(**config)  # Your hybrid
+        self.control_embedder = ControlEmbedder(**config.__dict__)  # Your hybrid
 
         # base blocks
         drop_path = [x.item() for x in torch.linspace(0, config.drop_path, self.depth)]
