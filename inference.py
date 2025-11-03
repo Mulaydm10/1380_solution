@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+from src.registry import MODELS, SCHEDULERS, build_module
 from diffusers import DDPMScheduler
 from PIL import Image
 from safetensors.torch import load_file
