@@ -245,7 +245,7 @@ if __name__ == "__main__":
 
             # Decode and save
             with torch.no_grad():
-                vae.to(device)
+                vae.to(device, dtype=dtype)
                 latents = latents / vae.scaling_factor
                 decoded_frames = []
                 for i in range(latents.size(1)):

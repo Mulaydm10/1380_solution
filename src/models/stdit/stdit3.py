@@ -7,7 +7,6 @@ from timm.models.layers import DropPath
 from timm.models.vision_transformer import Mlp
 from transformers import PretrainedConfig, PreTrainedModel
 
-
 from src.models.layers.blocks import (
     Attention,
     MultiHeadCrossAttention,
@@ -56,7 +55,9 @@ class STDiT3Block(nn.Module):
         )
 
         self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads)
-        self.bev_cross_attn = MultiHeadCrossAttention(hidden_size, num_heads)  # Keep for BEV
+        self.bev_cross_attn = MultiHeadCrossAttention(
+            hidden_size, num_heads
+        )  # Keep for BEV
 
         self.norm2 = get_layernorm(
             hidden_size, eps=1e-6, affine=False, use_kernel=enable_layernorm_kernel
@@ -70,7 +71,9 @@ class STDiT3Block(nn.Module):
 
         # other helpers
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
-        self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size**0.5)
+        self.scale_shift_table = nn.Parameter(
+            torch.randn(6, hidden_size) / hidden_size**0.5
+        )
 
     def forward(
         self,
@@ -89,17 +92,13 @@ class STDiT3Block(nn.Module):
             "b ... -> b ...",  # No NC repeat
         ).chunk(6, dim=1)
 
-        print(f"[STDiT3Block.forward] Input x shape: {x.shape}")
         x_m = t2i_modulate(self.norm1(x), shift_msa, scale_msa)
-        print(f"[STDiT3Block.forward] Shape of x_m after norm1: {x_m.shape}")
 
         ######################
         # attention
         ######################
 
-        print(f"[STDiT3Block.forward] Attn input shape: {x_m.shape}")
         attn_output = self.attn(x_m)
-        print(f"[STDiT3Block.forward] Attn output shape: {attn_output.shape}")
         x_m = attn_output
 
         # modulate (attention)
@@ -117,7 +116,6 @@ class STDiT3Block(nn.Module):
 
         # BEV cross attn
         if y.shape[1] > 1:
-            print(f"[STDiT3Block.forward] BEV cond shape: {y[:, 1:2].shape}")
             x_bev = self.bev_cross_attn(x, y[:, 1:2], None)  # y[1] = BEV tokens
             x = x + x_bev
 
@@ -191,6 +189,7 @@ class STDiT3Config(PretrainedConfig):
 
 from src.models.layers.pos_embed import PositionEmbedding3D
 
+
 class STDiT3(PreTrainedModel):
     """
     Diffusion model with a Transformer backbone - Unified NC-Free Version.
@@ -202,7 +201,9 @@ class STDiT3(PreTrainedModel):
         super().__init__(config)
         self.pred_sigma = config.pred_sigma
         self.in_channels = config.in_channels
-        self.out_channels = config.in_channels * 2 if config.pred_sigma else config.in_channels
+        self.out_channels = (
+            config.in_channels * 2 if config.pred_sigma else config.in_channels
+        )
 
         # model size related
         self.depth = config.depth
@@ -218,11 +219,15 @@ class STDiT3(PreTrainedModel):
         # input size related
         self.patch_size = config.patch_size
         self.input_sq_size = config.input_sq_size
-        self.pos_embed = PositionEmbedding3D(self.hidden_size, input_size=config.input_size, patch_size=config.patch_size)
+        self.pos_embed = PositionEmbedding3D(
+            self.hidden_size, input_size=config.input_size, patch_size=config.patch_size
+        )
         self.rope = RotaryEmbedding(dim=self.hidden_size // self.num_heads)
 
         # embedding
-        self.x_embedder = PatchEmbed3D(self.patch_size, self.in_channels, self.hidden_size)
+        self.x_embedder = PatchEmbed3D(
+            self.patch_size, self.in_channels, self.hidden_size
+        )
         self.t_embedder = TimestepEmbedder(self.hidden_size)
         self.t_block = nn.Sequential(
             nn.SiLU(), nn.Linear(self.hidden_size, 6 * self.hidden_size, bias=True)
@@ -231,9 +236,9 @@ class STDiT3(PreTrainedModel):
         # base_token, should not be trainable
         self.register_buffer("base_token", torch.randn(self.hidden_size))
         # Unified control embedder
-    
+
         from .control_embedder import ControlEmbedder
-        print(f"[STDiT3.__init__] Passing config to ControlEmbedder: {config.__dict__}")
+
         self.control_embedder = ControlEmbedder(MODELS, **config.__dict__)
 
         # base blocks
@@ -278,13 +283,21 @@ class STDiT3(PreTrainedModel):
                     nn.init.constant_(module.bias, 0)
 
         # zero init embedder proj
-        if hasattr(self, 'control_embedder') and self.control_embedder is not None:
-            if self.control_embedder.bbox_embedder is not None and hasattr(self.control_embedder.bbox_embedder, 'after_proj'):
+        if hasattr(self, "control_embedder") and self.control_embedder is not None:
+            if self.control_embedder.bbox_embedder is not None and hasattr(
+                self.control_embedder.bbox_embedder, "after_proj"
+            ):
                 _zero_init(self.control_embedder.bbox_embedder.after_proj)
-            if self.control_embedder.cam_embedder is not None and hasattr(self.control_embedder.cam_embedder, 'after_proj'):
+            if self.control_embedder.cam_embedder is not None and hasattr(
+                self.control_embedder.cam_embedder, "after_proj"
+            ):
                 _zero_init(self.control_embedder.cam_embedder.after_proj)
-            if self.control_embedder.cam_embedder is not None and hasattr(self.control_embedder.cam_embedder, 'emb2token'):
-                nn.init.normal_(self.control_embedder.cam_embedder.emb2token.weight, std=0.02)
+            if self.control_embedder.cam_embedder is not None and hasattr(
+                self.control_embedder.cam_embedder, "emb2token"
+            ):
+                nn.init.normal_(
+                    self.control_embedder.cam_embedder.emb2token.weight, std=0.02
+                )
         else:
             # Fallback for original structure if control_embedder not present
             if self.bbox_embedder is not None:
@@ -335,18 +348,12 @@ class STDiT3(PreTrainedModel):
         x_b = self.x_embedder(x)  # [B, N=T*S, C] unified
         x = self.pos_embed(x_b)  # [B, N, C]
 
-        print(f"[STDiT3.forward] Shape of x before blocks: {x.shape}")
-        print(f"[STDiT3.forward] Shape of y (encoder_hidden_states): {y.shape}")
-        print(f"[STDiT3.forward] Shape of t_mlp: {t_mlp.shape}")
-
         # === blocks ===
         for block_i in range(self.depth):
-            print(f"--- Entering STDiT3Block {block_i} ---")
             x = self.spatial_blocks[block_i](x, y, t_mlp, T=T, S=S)  # No NC
 
         # === final layer ===
-        t_emb_2d = t_emb.squeeze(1) # Shape [1, 1, 1152] -> [1, 1152]
-        print(f"[STDiT3.forward] Squeezed t_emb_2d shape for final_layer: {t_emb_2d.shape}")
+        t_emb_2d = t_emb.squeeze(1)  # Shape [1, 1, 1152] -> [1, 1152]
         x = self.final_layer(x, t_emb_2d, T=T, S=S)
 
         # === unpatchify ===
@@ -383,6 +390,9 @@ class STDiT3(PreTrainedModel):
 
 @MODELS.register_module("STDiT3-XL/2")
 def SdgSTDiT3_XL_2(**kwargs):
-    config = STDiT3Config(depth=28, hidden_size=1152, patch_size=(1, 2, 2), num_heads=16, **kwargs)
+    config = STDiT3Config(
+        depth=28, hidden_size=1152, patch_size=(1, 2, 2), num_heads=16, **kwargs
+    )
     model = STDiT3(config)
     return model
+

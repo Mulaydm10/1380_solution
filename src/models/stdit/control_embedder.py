@@ -1,15 +1,11 @@
 import logging
 
 import timm
-print("[control_embedder.py] Importing control_embedder.py...")
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange, repeat
 from mmengine.registry import build_from_cfg
-from einops import repeat, rearrange
-
-
-from einops import repeat
 
 from .utils import zero_module
 
@@ -204,28 +200,20 @@ class CamEmbedder(nn.Module):
             self.after_proj = None
 
     def embed_cam(self, param, mask=None, **kwargs):
-        print(f"--- CamEmbedder.embed_cam START ---")
-        print(f"[CamEmbedder.embed_cam] param shape: {param.shape}")
-
         # Permute to put the dimension to be embedded last: [B, T, N_CAM, 7, 3]
         param = param.permute(0, 1, 2, 4, 3)
-        print(f"[CamEmbedder.embed_cam] param shape after permute: {param.shape}")
 
         # Get embeddings: [B, T, N_CAM, 7, 27]
         emb = self.embedder(param)
-        print(f"[CamEmbedder.embed_cam] emb shape after embedder: {emb.shape}")
 
         # Reshape for the linear layer: [B, T, N_CAM, 189] (where 189 = 7 * 27)
-        emb = rearrange(emb, 'b t n d_seven d_emb -> b t n (d_seven d_emb)')
-        print(f"[CamEmbedder.embed_cam] emb shape after rearrange: {emb.shape}")
+        emb = rearrange(emb, "b t n d_seven d_emb -> b t n (d_seven d_emb)")
 
         # Get tokens: [B, T, N_CAM, 1152]
         token = self.emb2token(emb)
-        print(f"[CamEmbedder.embed_cam] token shape after emb2token: {token.shape}")
 
         # Reshape to (B, N_CAM, D): [B*T, N_CAM, 1152]
-        token = rearrange(token, 'b t n d -> (b t) n d')
-        print(f"[CamEmbedder.embed_cam] final token shape: {token.shape}")
+        token = rearrange(token, "b t n d -> (b t) n d")
 
         if self.after_proj:
             token = self.after_proj(token)
@@ -263,53 +251,63 @@ def general_ragged_pad(list_of_tensors, pad_value=0.0):
     masks = []
     for t in list_of_tensors:
         pad_shape = [max_d - t_d for max_d, t_d in zip(max_dims, t.shape)]
-        padding = [item for sublist in zip([0]*len(pad_shape), pad_shape) for item in sublist]
-        padded_t = F.pad(t, padding, 'constant', pad_value)
+        padding = [
+            item for sublist in zip([0] * len(pad_shape), pad_shape) for item in sublist
+        ]
+        padded_t = F.pad(t, padding, "constant", pad_value)
         padded_tensors.append(padded_t)
 
         mask = torch.ones_like(t, dtype=torch.bool)
-        mask_padded = F.pad(mask, padding, 'constant', False)
+        mask_padded = F.pad(mask, padding, "constant", False)
         masks.append(mask_padded)
 
-    return {
-        'data': torch.stack(padded_tensors),
-        'mask': torch.stack(masks)
-    }
+    return {"data": torch.stack(padded_tensors), "mask": torch.stack(masks)}
+
 
 class ControlEmbedder(nn.Module):
     def __init__(self, models_registry, **kwargs):
         super().__init__()
-        print(f"[ControlEmbedder.__init__] Received kwargs: {kwargs}")
-        self.models_registry = models_registry # Store the injected registry
-        embed_dim = kwargs.get('hidden_size', 1152) # Get embed_dim from kwargs, default to 1152
+        self.models_registry = models_registry  # Store the injected registry
+        embed_dim = kwargs.get(
+            "hidden_size", 1152
+        )  # Get embed_dim from kwargs, default to 1152
 
-        cam_param = kwargs.get('cam_encoder_param', {})
-        cam_param['type'] = kwargs.get('cam_encoder_cls')
-        cam_param['out_dim'] = embed_dim # Add the missing out_dim
-        print(f"[ControlEmbedder.__init__] Building cam_embedder with param: {cam_param}")
+        cam_param = kwargs.get("cam_encoder_param", {})
+        cam_param["type"] = kwargs.get("cam_encoder_cls")
+        cam_param["out_dim"] = embed_dim  # Add the missing out_dim
         self.cam_embedder = build_from_cfg(cam_param, models_registry)
 
-        bbox_param = kwargs.get('bbox_embedder_param', {})
-        bbox_param['type'] = kwargs.get('bbox_embedder_cls')
-        print(f"[ControlEmbedder.__init__] Building bbox_embedder with param: {bbox_param}")
+        bbox_param = kwargs.get("bbox_embedder_param", {})
+        bbox_param["type"] = kwargs.get("bbox_embedder_cls")
         self.bbox_embedder = build_from_cfg(bbox_param, models_registry)
 
-        self.bev_embedder = BEVEmbedder(embed_dim=embed_dim) # Pass embed_dim
+        self.bev_embedder = BEVEmbedder(embed_dim=embed_dim)  # Pass embed_dim
 
     def forward(self, bboxes_dict, camera_params, bev_grid=None, **kwargs):
-        print(f"--- ControlEmbedder.forward START (Batch {len(bboxes_dict.get('bboxes', []))} Scenes) ---")
+        print(
+            f"--- ControlEmbedder.forward START (Batch {len(bboxes_dict.get('bboxes', []))} Scenes) ---"
+        )
 
         # Direct access to lists (collate's dict-of-lists)
-        bboxes_per_scene = bboxes_dict.get('bboxes', [])  # List[tensor [1,1,N,8,3]]; safe empty
-        classes_per_scene = bboxes_dict.get('classes', [])  # List[tensor [N]]
-        masks_per_scene = bboxes_dict.get('masks', [])  # List[tensor [N,?]]
+        bboxes_per_scene = bboxes_dict.get(
+            "bboxes", []
+        )  # List[tensor [1,1,N,8,3]]; safe empty
+        classes_per_scene = bboxes_dict.get("classes", [])  # List[tensor [N]]
+        masks_per_scene = bboxes_dict.get("masks", [])  # List[tensor [N,?]]
 
         B = len(bboxes_per_scene)  # Batch size from list len
         if B == 0:
-            return torch.zeros(0, self.embed_dim, device=camera_params.device)  # Empty batch
+            return torch.zeros(
+                0, self.embed_dim, device=camera_params.device
+            )  # Empty batch
 
         # Max objs from list (shape[2] for bboxes dim)
-        max_objs = max(b.shape[2] for b in bboxes_per_scene) if len(bboxes_per_scene) > 0 and all(b.numel() > 0 for b in bboxes_per_scene) else 0
+        max_objs = (
+            max(b.shape[2] for b in bboxes_per_scene)
+            if len(bboxes_per_scene) > 0
+            and all(b.numel() > 0 for b in bboxes_per_scene)
+            else 0
+        )
         print(f"[Embedder] Batch max_objs: {max_objs} (from {B} scenes)")
 
         # Pad lists (ragged to batch-padded)
@@ -318,24 +316,33 @@ class ControlEmbedder(nn.Module):
         masks_pad = general_ragged_pad(masks_per_scene, pad_value=False)
 
         # Extract tensors
-        bbox_data = bboxes_pad['data'].squeeze(1).squeeze(1)
-        class_data = classes_pad['data'].squeeze(1).squeeze(1).long()
-        attention_mask = classes_pad['mask'].squeeze(1).squeeze(1).float()
+        bbox_data = bboxes_pad["data"].squeeze(1).squeeze(1)
+        class_data = classes_pad["data"].squeeze(1).squeeze(1).long()
+        attention_mask = classes_pad["mask"].squeeze(1).squeeze(1).float()
 
-        print(f"[Embedder] Padded shapes to BBoxEmbedder: bboxes {bbox_data.shape} (dtype={bbox_data.dtype}), classes {class_data.shape} (dtype={class_data.dtype}), mask {attention_mask.shape} (dtype={attention_mask.dtype})")
+        print(
+            f"[Embedder] Padded shapes to BBoxEmbedder: bboxes {bbox_data.shape} (dtype={bbox_data.dtype}), classes {class_data.shape} (dtype={class_data.dtype}), mask {attention_mask.shape} (dtype={attention_mask.dtype})"
+        )
 
         # BBoxEmbedder
-        bbox_tokens = self.bbox_embedder(bboxes=bbox_data, classes=class_data, mask=attention_mask, **kwargs)
+        bbox_tokens = self.bbox_embedder(
+            bboxes=bbox_data, classes=class_data, mask=attention_mask, **kwargs
+        )
 
         # Rest (cam/bev) unchanged
         cam_tokens = self.cam_embedder.embed_cam(camera_params)[0]
         if bev_grid is not None:
             bev_tokens = self.bev_embedder(bev_grid)
-            print(f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens {bev_tokens.shape}")
+            print(
+                f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens {bev_tokens.shape}"
+            )
             cond_embeds = torch.cat([bbox_tokens, cam_tokens, bev_tokens], dim=1)
         else:
-            print(f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens None")
+            print(
+                f"[Embedder] Shapes before cat: bbox_tokens {bbox_tokens.shape}, cam_tokens {cam_tokens.shape}, bev_tokens None"
+            )
             cond_embeds = torch.cat([bbox_tokens, cam_tokens], dim=1)
 
         print(f"[Embedder] Final cond_embeds: {cond_embeds.shape}")
         return cond_embeds
+
