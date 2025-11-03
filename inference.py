@@ -112,7 +112,7 @@ if __name__ == "__main__":
     latest_checkpoint_path = latest_epoch_dir / "model.safetensors"
 
     print(f"Loading main model from latest checkpoint: {latest_checkpoint_path}")
-    partial_load_checkpoint(model, latest_checkpoint_path)
+    partial_load_checkpoint(model, latest_checkpoint_path, map_location=device)
     model.eval()
 
     scheduler = RFlowScheduler(**scheduler_config_dict)
