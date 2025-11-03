@@ -266,14 +266,20 @@ class ControlEmbedder(nn.Module):
     def __init__(self, models_registry, **kwargs):
         super().__init__()
         print(f"[ControlEmbedder.__init__] Received kwargs: {kwargs}")
-        self.models_registry = models_registry # Store the injected registry
-        embed_dim = kwargs.get('hidden_size', 1152) # Get embed_dim from kwargs, default to 1152
+        self.models_registry = models_registry
+        embed_dim = kwargs.get('hidden_size', 1152)
 
-        self.cam_embedder = build_from_cfg(kwargs.get('cam_encoder_param'), models_registry,
-                                           default_args={'_type_': kwargs.get('cam_encoder_cls')})
-        self.bbox_embedder = build_from_cfg(kwargs.get('bbox_embedder_param'), models_registry,
-                                            default_args={'_type_': kwargs.get('bbox_embedder_cls')})
-        self.bev_embedder = BEVEmbedder(embed_dim=embed_dim) # Pass embed_dim
+        cam_param = kwargs.get('cam_encoder_param', {})
+        cam_param['type'] = kwargs.get('cam_encoder_cls')
+        print(f"[ControlEmbedder.__init__] Building cam_embedder with param: {cam_param}")
+        self.cam_embedder = build_from_cfg(cam_param, models_registry)
+
+        bbox_param = kwargs.get('bbox_embedder_param', {})
+        bbox_param['type'] = kwargs.get('bbox_embedder_cls')
+        print(f"[ControlEmbedder.__init__] Building bbox_embedder with param: {bbox_param}")
+        self.bbox_embedder = build_from_cfg(bbox_param, models_registry)
+
+        self.bev_embedder = BEVEmbedder(embed_dim=embed_dim)
 
 
     def forward(self, bboxes_list, camera_params, bev_grid=None, **kwargs):
