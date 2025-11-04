@@ -73,21 +73,39 @@ def partial_load_checkpoint(model, checkpoint_path, map_location):
     return loaded_count, skipped_keys
 
 
-def save_gif(images, path, fps=2):
-    images = (images.clamp(-1, 1) + 1) / 2
-    pil_frames = [
-        Image.fromarray((img.permute(1, 2, 0).cpu().numpy() * 255).astype("uint8"))
-        for img in images[0]
-    ]
+def save_gif(images_tensor, path='gen.gif', camera_names=None, fps=1):
+    """
+    From [1,3,320,256,256] → 320 frames (256,256,3) numpy → GIF.
+    """
+    # Denorm to [0,1]
+    images_tensor = torch.clamp(images_tensor, -1, 1)
+    images_tensor = (images_tensor + 1) / 2  # [1,3,320,256,256]
 
-    pil_frames[0].save(
+    # Squeeze batch, permute to [320,256,256,3]
+    images = images_tensor.squeeze(0).permute(0, 3, 4, 1).cpu().numpy()  # V=320 first, then H,W,C
+
+    # V-loop to frames
+    frames = []
+    for v in range(images.shape[0]):  # 320 views/frames
+        img_v = images[v]  # (256,256,3) float [0,1]
+        img_v = (img_v * 255).astype(np.uint8)  # uint8 for PIL
+        frames.append(Image.fromarray(img_v))
+
+    # Save GIF (loop=0 for repeat; duration=1000/fps ms)
+    frames[0].save(
         path,
         save_all=True,
-        append_images=pil_frames[1:],
-        duration=1000 // fps,
-        loop=0,
+        append_images=frames[1:],
+        duration=int(1000 / fps),
+        loop=0
     )
-    print(f"GIF saved to {path}")
+    print(f"GIF saved: {path} ({len(frames)} frames at {fps}fps)")
+
+    # Optional: PNG seq for eval (named views if camera_names)
+    if camera_names and len(camera_names) == len(frames):
+        for i, (v, name) in enumerate(zip(frames, camera_names)):
+            v.save(f"{name}.png")
+        print(f"PNG seq saved: view_{camera_names[0]}.png etc.")
 
 
 if __name__ == "__main__":
