@@ -118,7 +118,6 @@ def main():
         gradient_accumulation_steps=training_config.gradient_accumulation_steps,
         log_with="tensorboard",
         project_dir=os.path.join(training_config.output_dir, "logs"),
-        cpu_offload=True
     )
     if accelerator.is_main_process:
         accelerator.init_trackers("tensorboard")
@@ -181,6 +180,10 @@ def main():
     model, optimizer, train_dataloader, lr_scheduler, vae = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler, vae
     )
+
+    # Offload model and optimizer to CPU
+    cpu_offload(model, execution_device=accelerator.device)
+    cpu_offload(optimizer, execution_device=accelerator.device)
 
     model.gradient_checkpointing_enable()
     if accelerator.is_main_process:

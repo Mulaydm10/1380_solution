@@ -9,7 +9,7 @@ transformers==4.44.2
 
 # Accelerate/opcv
 accelerate==1.6.0
-opencv-python==4.10.0.84
+opencv-python-headless
 
 # Flash-attn last (links to torch)
 flash-attn==2.8.3
@@ -22,4 +22,4 @@ safetensors
 pillow
 einops
 tqdm
-einops
+xformers
