@@ -97,7 +97,6 @@ from config import model as model_config_dict  # Import configs
 from config import scheduler as scheduler_config_dict
 from config import vae as vae_config_dict
 from src.data.collate import Collate
-
 # Project imports (assuming they are in PYTHONPATH)
 from src.data.dataset import SensorGenDataset  # Using existing dataset
 from src.models.cog_vae.vae_cogvideox import VideoAutoencoderKLCogVideoX
@@ -281,25 +280,15 @@ def main():
                 loss = F.mse_loss(predicted_noise.float(), noise.float())
 
                 accelerator.backward(loss)
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(
-                        model.parameters(), training_config.max_grad_norm
-                    )
-
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
-
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.synchronize()
-                del predicted_noise, noise, cond_emb, gt_latents, noisy_latents
-
-            # Logging
-            if accelerator.sync_gradients:
-                progress_bar.update(1)
-                global_step += 1
-                logs = {
+                            if accelerator.sync_gradients:
+                                accelerator.clip_grad_norm_(model.parameters(), training_config.max_grad_norm)
+                
+                                optimizer.step()
+                                lr_scheduler.step()
+                                optimizer.zero_grad()
+                
+                                progress_bar.update(1)
+                                global_step += 1                logs = {
                     "loss": loss.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0],
                     "step": global_step,
