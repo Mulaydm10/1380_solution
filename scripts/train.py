@@ -21,20 +21,24 @@ torch.backends.cudnn.benchmark = False
 torch.backends.cuda.enable_flash_sdp(False)  # Standard attn, less VRAM
 
 
-
-
-
 import math
+
 import torch.nn as nn
 
-def partial_load_checkpoint(model, checkpoint_path, skip_prefixes=['x_embedder', 'final_layer'], init_skipped=True):
+
+def partial_load_checkpoint(
+    model,
+    checkpoint_path,
+    skip_prefixes=["x_embedder", "final_layer"],
+    init_skipped=True,
+):
     """
     Loads matching keys from checkpoint; skips mismatches (e.g., channel changes).
     Inits skipped layers randomly (kaiming) or zeros.
     Returns: loaded_count, skipped_keys
     """
     print("=== Partial Checkpoint Load START ===")
-    state_dict = torch.load(checkpoint_path, map_location='cpu')
+    state_dict = torch.load(checkpoint_path, map_location="cpu")
     model_dict = model.state_dict()
     loaded_count = 0
     skipped_keys = []
@@ -49,15 +53,21 @@ def partial_load_checkpoint(model, checkpoint_path, skip_prefixes=['x_embedder',
         if ckpt_value.shape == model_value.shape:
             model_dict[key].copy_(ckpt_value)
             loaded_count += 1
-            if 'spatial_blocks' in key:
-                print(f"[SUCCESS] Loaded core layer: {key[:70]}... (shape {ckpt_value.shape})")
+            if "spatial_blocks" in key:
+                print(
+                    f"[SUCCESS] Loaded core layer: {key[:70]}... (shape {ckpt_value.shape})"
+                )
             else:
-                print(f"[INFO] Loaded other layer: {key[:70]}... (shape {ckpt_value.shape})")
+                print(
+                    f"[INFO] Loaded other layer: {key[:70]}... (shape {ckpt_value.shape})"
+                )
         else:
             skipped_keys.append(key)
-            print(f"[WARNING] Shape mismatch (skipping): {key} – CKPT {ckpt_value.shape} vs MODEL {model_value.shape}")
+            print(
+                f"[WARNING] Shape mismatch (skipping): {key} – CKPT {ckpt_value.shape} vs MODEL {model_value.shape}"
+            )
             if init_skipped:
-                if 'weight' in key:
+                if "weight" in key:
                     print(f"  -> Initializing weight with Kaiming Uniform: {key}")
                     nn.init.kaiming_uniform_(model_value, a=math.sqrt(5))
                 else:
@@ -70,15 +80,18 @@ def partial_load_checkpoint(model, checkpoint_path, skip_prefixes=['x_embedder',
     print(f"Total keys in model: {len(model_dict)}")
     print(f"Successfully loaded {loaded_count} matching keys.")
     print(f"Skipped {len(skipped_keys)} mismatched keys: {skipped_keys}")
-    
-    core_preserved = all('spatial_blocks' not in k for k in skipped_keys)
+
+    core_preserved = all("spatial_blocks" not in k for k in skipped_keys)
     print(f"Core `spatial_blocks` preserved: {core_preserved}")
     print("=================================")
-    
+
     if not core_preserved:
-        raise RuntimeError("Critical Error: Core spatial blocks were not loaded. Aborting.")
-        
+        raise RuntimeError(
+            "Critical Error: Core spatial blocks were not loaded. Aborting."
+        )
+
     return loaded_count, skipped_keys
+
 
 from config import model as model_config_dict  # Import configs
 from config import scheduler as scheduler_config_dict
@@ -121,7 +134,9 @@ def main():
     )
     if accelerator.is_main_process:
         accelerator.init_trackers("tensorboard")
-        print(f"TensorBoard logs will be saved to: {os.path.join(training_config.output_dir, 'logs')}")
+        print(
+            f"TensorBoard logs will be saved to: {os.path.join(training_config.output_dir, 'logs')}"
+        )
     torch.backends.cuda.enable_mem_efficient_sdp(False)
 
     if accelerator.is_main_process:
@@ -134,7 +149,7 @@ def main():
         p.name
         for p in pathlib.Path(training_config.data_path).iterdir()
         if (p / "ride_id.json").exists()
-    ][:50] # Use only 50 scenes for the proof run
+    ][:50]  # Use only 50 scenes for the proof run
     train_dataset = SensorGenDataset(scenes, pathlib.Path(training_config.data_path))
     train_dataloader = DataLoader(
         train_dataset,
@@ -147,8 +162,13 @@ def main():
     # Load VAE
     vae = build_module(vae_config_dict, MODELS)
     # Load STDiT3 model
-    model_config_dict['in_channels'] = 80
-    model_config_dict['input_size'] = (80, 5, 64, 64) # (latent_channels, num_views, latent_height, latent_width)
+    model_config_dict["in_channels"] = 80
+    model_config_dict["input_size"] = (
+        80,
+        5,
+        64,
+        64,
+    )  # (latent_channels, num_views, latent_height, latent_width)
     if accelerator.is_main_process:
         print(f"[Model Build] Overriding model config. New config: {model_config_dict}")
     if accelerator.is_main_process:
@@ -162,9 +182,9 @@ def main():
     loaded_count, skipped_keys = partial_load_checkpoint(model, ckpt_path)
 
     if len(skipped_keys) > 50:
-        raise ValueError("Over 50 mismatched keys, something is wrong with the checkpoint or model architecture.")
-
-
+        raise ValueError(
+            "Over 50 mismatched keys, something is wrong with the checkpoint or model architecture."
+        )
 
     # 4. OPTIMIZER & SCHEDULER
     optimizer = AdamW(
@@ -185,7 +205,7 @@ def main():
     # Offload model to CPU
     cpu_offload(model, execution_device=accelerator.device)
 
-    model.gradient_checkpointing_enable()
+    # model.gradient_checkpointing_enable()
     if accelerator.is_main_process:
         print("***** Starting training *****")
         print(f"  Num examples = {len(train_dataset)}")
@@ -214,44 +234,49 @@ def main():
 
                 with torch.no_grad():
                     vae.to(accelerator.device)
-                    images_gt = batch['images_gt']
+                    images_gt = batch["images_gt"]
                     if accelerator.is_main_process:
                         print(f"[VAE Encode] Input images_gt shape: {images_gt.shape}")
 
                     latents_list = []
                     for i in range(images_gt.size(1)):
-                        view = images_gt[:, i:i+1, :, :, :]
+                        view = images_gt[:, i : i + 1, :, :, :]
                         view_permed = view.permute(0, 2, 1, 3, 4)
                         latent_view = vae.encode(view_permed)
                         latents_list.append(latent_view)
-                    
+
                     gt_latents = torch.cat(latents_list, dim=1)
                     if accelerator.is_main_process:
-                        print(f"[VAE Encode] Output gt_latents shape: {gt_latents.shape}")
+                        print(
+                            f"[VAE Encode] Output gt_latents shape: {gt_latents.shape}"
+                        )
 
                     vae.to("cpu")
 
-                t = torch.rand(gt_latents.shape[0], device=accelerator.device).view(-1, 1, 1, 1, 1)
+                t = torch.rand(gt_latents.shape[0], device=accelerator.device).view(
+                    -1, 1, 1, 1, 1
+                )
                 noise = torch.randn_like(gt_latents)
                 noisy_latents = (1 - t) * gt_latents + t * noise
                 timesteps = t.squeeze(-1).squeeze(-1).squeeze(-1)
 
                 from src.models.stdit.control_embedder import ControlEmbedder
-                print(f"[train.py] Instantiating ControlEmbedder with registry: {MODELS} and config: {model.config.__dict__}")
-                control_embedder_instance = ControlEmbedder(MODELS, **model.config.__dict__)
+
+                print(
+                    f"[train.py] Instantiating ControlEmbedder with registry: {MODELS} and config: {model.config.__dict__}"
+                )
+                control_embedder_instance = ControlEmbedder(
+                    MODELS, **model.config.__dict__
+                )
                 control_embedder_instance.to(accelerator.device)
 
-                bboxes_list = batch['bboxes_3d_data']
+                bboxes_list = batch["bboxes_3d_data"]
                 cond_emb = control_embedder_instance(
-                    bboxes_list,
-                    batch['camera_param'],
-                    batch['bev_grid']
+                    bboxes_list, batch["camera_param"], batch["bev_grid"]
                 )
 
                 predicted_noise = model(
-                    noisy_latents,
-                    timesteps,
-                    encoder_hidden_states=cond_emb
+                    noisy_latents, timesteps, encoder_hidden_states=cond_emb
                 )
                 loss = F.mse_loss(predicted_noise.float(), noise.float())
 
@@ -289,17 +314,25 @@ def main():
 
             # --- Rolling Checkpoint Management ---
             checkpoint_dirs = sorted(
-                [d for d in os.listdir(training_config.output_dir) if d.startswith("epoch_")],
-                key=lambda x: int(x.split('_')[-1])
+                [
+                    d
+                    for d in os.listdir(training_config.output_dir)
+                    if d.startswith("epoch_")
+                ],
+                key=lambda x: int(x.split("_")[-1]),
             )
-            max_checkpoints = 2 # Keep the 2 most recent checkpoints
+            max_checkpoints = 2  # Keep the 2 most recent checkpoints
             if len(checkpoint_dirs) > max_checkpoints:
-                dir_to_delete = os.path.join(training_config.output_dir, checkpoint_dirs[0])
-                print(f"[Checkpoint Manager] Deleting oldest checkpoint to save space: {dir_to_delete}")
+                dir_to_delete = os.path.join(
+                    training_config.output_dir, checkpoint_dirs[0]
+                )
+                print(
+                    f"[Checkpoint Manager] Deleting oldest checkpoint to save space: {dir_to_delete}"
+                )
                 # Use shutil.rmtree for safely deleting directories
                 import shutil
-                shutil.rmtree(dir_to_delete)
 
+                shutil.rmtree(dir_to_delete)
 
 
 if __name__ == "__main__":
