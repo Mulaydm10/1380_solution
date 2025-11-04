@@ -321,9 +321,14 @@ def main():
                 for old in checkpoint_dirs[:-1]:
                     shutil.rmtree(os.path.join(training_config.output_dir, old))
 
-            # Save model only (safetensors – no zip/pos error)
+            # Create dir for current epoch
+            epoch_dir = os.path.join(training_config.output_dir, f"epoch_{epoch}")
+            os.makedirs(epoch_dir, exist_ok=True)
+            print(f"[Checkpoint] Created dir: {epoch_dir}")
+
+            # Save model safetensors (now path exists)
             model_state = accelerator.unwrap_model(model).state_dict() if accelerator.distributed_type == 'DDP' else model.state_dict()
-            save_file(model_state, os.path.join(training_config.output_dir, f"epoch_{epoch}", "model.safetensors"))
+            save_file(model_state, os.path.join(epoch_dir, "model.safetensors"))
             print(f"[Checkpoint] Saved model safetensors for epoch {epoch}")
 
             # Optional: Save config for recreate
