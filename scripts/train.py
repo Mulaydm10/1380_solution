@@ -205,7 +205,7 @@ def main():
     )
 
     # Offload model to CPU
-    cpu_offload(model, execution_device=accelerator.device)
+    # cpu_offload(model, execution_device=accelerator.device)
 
     # model.gradient_checkpointing_enable()
     if accelerator.is_main_process:
