@@ -290,7 +290,7 @@ if __name__ == "__main__":
 
             vae.to(device)
             with torch.no_grad(), torch.autocast(device, dtype=dtype):
-                decoded = vae.decode(latents_for_decode).sample
+                decoded = vae.decode(latents_for_decode)
             vae.cpu()
             print(f"Decoded shape/range: {decoded.shape}, min {decoded.min():.3f}, max {decoded.max():.3f}")
 
