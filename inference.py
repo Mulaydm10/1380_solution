@@ -260,54 +260,33 @@ if __name__ == "__main__":
                     latents = scheduler.step(noise_pred, t, latents).prev_sample
                 print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
 
-            # --- Start Grok Patch: VAE Decode & Save (Root Cause Fix) ---
-
-            # Fix 1: Explicitly Reshape Latent Tensor for 5 Views
-            print(f"Initial latents shape from denoiser: {latents.shape}")
-            # The model output is [1, 16, 80, 32, 32]. We will reshape this to [1, 16, 5, 64, 64]
-            # This assumes the 80 temporal dimension can be reshaped into 5 views with a different spatial resolution.
-            # A more direct approach is to force the shape as Grok suggests.
-            latents = latents.view(1, 16, 5, 16, 32, 32).permute(0, 2, 1, 3, 4, 5).reshape(1 * 5, 16, 16, 32, 32)
-            # The above is complex. Let's follow the simpler, direct reshape.
-            # Assuming the 80 frames are 5 views of 16 frames each.
-            # Let's reshape to [B, C, T_views, H, W]
-            try:
-                latents = latents.view(1, 16, 5, 64, 64)
-            except RuntimeError:
-                # If view() fails due to non-contiguous memory, use reshape()
-                latents = latents.reshape(1, 16, 5, 64, 64)
-            print(f"Explicit latents shape for VAE: {latents.shape}")
-
-            # Fix 2: Dtype/Clamp
-            print("VAE sf:", vae.scaling_factor)
-            latents_for_decode = latents / vae.scaling_factor
-            print(f"Pre-decode range: min {latents_for_decode.min():.3f}, max {latents_for_decode.max():.3f}")
+            # --- Single-View Proof: Skip Multi Reshape, Decode Direct ---
+            print("Latents shape pre-decode: ", latents.shape, "min/max", latents.min(), latents.max())
+            latents = latents / vae.scaling_factor  # Pre-decode /sf (round-trip)
+            print("VAE sf:", vae.scaling_factor)  # ~0.13 for Cog
 
             vae.to(device)
-            with torch.no_grad(), torch.autocast(device, dtype=dtype):
-                # The VAE expects [B, C, T, H, W], so we pass the reshaped latents directly
-                decoded = vae.decode(latents_for_decode)
+            with torch.no_grad(), torch.autocast('cuda', dtype=dtype):
+                decoded = vae.decode(latents).sample  # Direct [1,3,512,512] or AR (e.g., 640x512 if input non-square)
             vae.cpu()
-            print(f"Decoded shape/range: {decoded.shape}, min {decoded.min():.3f}, max {decoded.max():.3f}")
+            print("Decoded shape/range: ", decoded.shape, "min/max", decoded.min().item(), decoded.max().item())
 
-            # The output should be [1, 3, 5, 512, 512] (B, C, T_views, H, W)
-            decoded_soft = torch.clamp(decoded, -1.2, 1.2)
+            # Soft norm + clamp
+            decoded_soft = torch.clamp(decoded, -1.2, 1.2)  # Soft to preserve spill
             decoded_norm = (decoded_soft / 2 + 0.5).clamp(0, 1)
+            print("Normed range: min", decoded_norm.min().item(), "max", decoded_norm.max().item())
 
-            # Fix 3: Save PNG Sequence
-            def save_png_seq(decoded_tensor, path_base='gen_view'):
-                # Squeeze batch, permute to [T_views, C, H, W]
-                decoded_tensor = decoded_tensor.squeeze(0)
-                for i in range(decoded_tensor.shape[0]): # Iterate through views
-                    img_tensor = decoded_tensor[i].permute(1, 2, 0).cpu() # H, W, C
-                    img = Image.fromarray((img_tensor * 255).round().byte().numpy())
-                    scene_output_dir = os.path.join(args.output_dir, scene_path.name)
-                    os.makedirs(scene_output_dir, exist_ok=True)
-                    img.save(os.path.join(scene_output_dir, f'{path_base}_{i}.png'))
-                print(f"Saved PNG sequence for scene {scene_path.name}")
+            # Squeeze batch, permute to [H,W,C] (single image)
+            decoded_uint8 = (decoded_norm * 255).round().byte().squeeze(0).permute(1, 2, 0).cpu().numpy()
+            print("Uint8 shape:", decoded_uint8.shape)  # [H,W,3]
 
-            save_png_seq(decoded_norm)
-            # --- End Grok Patch ---
+            # Save PNG (crisp test – no GIF)
+            img = Image.fromarray(decoded_uint8)
+            scene_output_dir = os.path.join(args.output_dir, scene_path.name)
+            os.makedirs(scene_output_dir, exist_ok=True)
+            output_path = os.path.join(scene_output_dir, 'single_view_test.png')
+            img.save(output_path)
+            print(f"Saved single_view_test.png to {output_path} – Open: Crisp scene or mush?")
 
         except Exception as e:
             print(f"!!! Failed to process scene {scene_path.name}: {e}")

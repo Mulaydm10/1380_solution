@@ -30,14 +30,15 @@ class SensorGenDataset(Dataset):
         cond_camera_pool = self.target_cameras[:3] + ["camera_side_right_backward"]
         self.cond_cameras = cond_camera_pool[:num_cond_cams] # Select N cameras from the pool
 
-        self.transform = T.Compose([
-            T.Resize(self.image_size),
+    def _preprocess_image(self, pil_img, size=(512,512)):
+        """Explicitly resize and crop to a square image."""
+        transform = T.Compose([
+            T.Resize(size),             # Resize to 512x512
+            T.CenterCrop(512),          # Crop to ensure it's exactly square
             T.ToTensor(),
-            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # To [-1,1]
+            T.Normalize(mean=[0.5]*3, std=[0.5]*3) # To [-1,1]
         ])
-
-    def __len__(self):
-        return len(self.scenes)
+        return transform(pil_img)
 
     def __getitem__(self, idx):
         result = {}
@@ -68,7 +69,7 @@ class SensorGenDataset(Dataset):
                 img_path = os.path.join(scene_path, 'images_gt', f"{cam_name}.jpg")
                 if os.path.exists(img_path):
                     img = Image.open(img_path).convert('RGB')
-                    gt_images.append(self.transform(img))
+                    gt_images.append(self._preprocess_image(img))
                 else:
                     logger.warning(f"Missing GT image: {img_path}")
                     gt_images.append(torch.zeros(3, *self.image_size))
@@ -86,7 +87,7 @@ class SensorGenDataset(Dataset):
                 img_path = os.path.join(scene_path, subdir, f"{cam_name}.jpg")
                 if os.path.exists(img_path):
                     img = Image.open(img_path).convert('RGB')
-                    cond_images.append(self.transform(img))
+                    cond_images.append(self._preprocess_image(img))
                 else:
                     logger.warning(f"Missing conditioning image: {img_path}")
                     cond_images.append(torch.zeros(3, *self.image_size))
@@ -96,7 +97,7 @@ class SensorGenDataset(Dataset):
             img_path = os.path.join(scene_path, 'images_input', "camera_side_right_backward.jpg")
             if os.path.exists(img_path):
                 img = Image.open(img_path).convert('RGB')
-                result['cond_cam_raw'] = self.transform(img).unsqueeze(0) # Add batch dim for consistency
+                result['cond_cam_raw'] = self._preprocess_image(img).unsqueeze(0) # Add batch dim for consistency
             else:
                 result['cond_cam_raw'] = torch.zeros(1, 3, *self.image_size)
 
