@@ -260,14 +260,14 @@ if __name__ == "__main__":
                     latents = scheduler.step(noise_pred, t, latents).prev_sample
                 print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
 
-            # --- Single-View Proof: Direct Decode, No .sample ---
+            # --- Single-View Proof: Squeeze T=1 Post-B for 3D Permute ---
             print("Latents shape pre-decode: ", latents.shape, "min/max", latents.min().item(), latents.max().item())
             latents = latents / vae.scaling_factor  # Pre-decode /sf
-            print("VAE sf:", vae.scaling_factor)  # ~0.13
+            print("VAE sf:", vae.scaling_factor)  # 1.15 OK for variant
 
             vae.to(device)
             with torch.no_grad(), torch.autocast('cuda', dtype=dtype):
-                decoded = vae.decode(latents)  # Direct tensor [1,3,512,512] – No .sample!
+                decoded = vae.decode(latents)  # [1,3,1,512,512] or 4D if T lost
             vae.cpu()
             print("Decoded shape/range: ", decoded.shape, "min/max", decoded.min().item(), decoded.max().item())
 
@@ -276,9 +276,13 @@ if __name__ == "__main__":
             decoded_norm = (decoded_soft / 2 + 0.5).clamp(0, 1)
             print("Normed range: min", decoded_norm.min().item(), "max", decoded_norm.max().item())
 
-            # Squeeze batch (dim=0): [3,512,512] 3D
+            # Squeeze B=1 (dim=0): [3,1,512,512] 4D (C,T,H,W)
             decoded_norm = decoded_norm.squeeze(0)
             print("Post-B squeeze shape: ", decoded_norm.shape)
+
+            # Squeeze T=1 (dim=1): [3,512,512] 3D (C,H,W)
+            decoded_norm = decoded_norm.squeeze(1)
+            print("Post-T squeeze shape: ", decoded_norm.shape)
 
             # Permute(1,2,0) on 3D: [512,512,3] [H,W,C]
             decoded_uint8 = (decoded_norm * 255).round().byte().permute(1, 2, 0).cpu().numpy()
