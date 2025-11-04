@@ -82,7 +82,7 @@ def save_gif(images_tensor, path='gen.gif', camera_names=None, fps=1):
     images_tensor = (images_tensor + 1) / 2  # [1,3,320,256,256]
 
     # Squeeze batch, permute to [320,256,256,3]
-    images = images_tensor.squeeze(0).permute(0, 3, 4, 1).cpu().numpy()  # V=320 first, then H,W,C
+    images = images_tensor.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()  # V=320 first, then H,W,C
 
     # V-loop to frames
     frames = []
