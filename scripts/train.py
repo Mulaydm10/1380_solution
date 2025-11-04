@@ -182,9 +182,8 @@ def main():
         model, optimizer, train_dataloader, lr_scheduler, vae
     )
 
-    # Offload model and optimizer to CPU
+    # Offload model to CPU
     cpu_offload(model, execution_device=accelerator.device)
-    cpu_offload(optimizer, execution_device=accelerator.device)
 
     model.gradient_checkpointing_enable()
     if accelerator.is_main_process:
