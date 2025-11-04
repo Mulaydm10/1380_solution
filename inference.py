@@ -74,12 +74,10 @@ def partial_load_checkpoint(model, checkpoint_path, map_location):
 
 
 def save_gif(images, path, fps=2):
-    print(f"[DEBUG] images shape in save_gif: {images.shape}")
     images = (images.clamp(-1, 1) + 1) / 2
-    images = images.squeeze(0)
     pil_frames = [
         Image.fromarray((img.permute(1, 2, 0).cpu().numpy() * 255).astype("uint8"))
-        for img in images
+        for img in images[0]
     ]
 
     pil_frames[0].save(
