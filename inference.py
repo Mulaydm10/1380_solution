@@ -247,7 +247,7 @@ if __name__ == "__main__":
             with torch.no_grad():
                 vae.to(device, dtype=dtype)
                 latents = latents / vae.scaling_factor
-                images = vae.decode(latents.to(torch.float16)).sample
+                images = vae.decode(latents.to(torch.float16))
                 vae.cpu()
 
             output_gif_path = os.path.join(args.output_dir, f"{scene_path.name}.gif")
