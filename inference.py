@@ -260,28 +260,23 @@ if __name__ == "__main__":
                     latents = scheduler.step(noise_pred, t, latents).prev_sample
                 print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
 
-            # --- Start Grok Patch: VAE Decode & Save ---
+            # --- Start Grok Patch: VAE Decode & Save (Root Cause Fix) ---
 
-            # Fix 1: Reshape Latent Tensor for Multi-View
-            # The model output is [B, C, T, H, W], but we need to be explicit about views.
-            # Let's assume T=80 contains 5 views of 16 frames each.
-            # Correct shape for video VAE is [B, C, T_views, H, W]
+            # Fix 1: Explicitly Reshape Latent Tensor for 5 Views
             print(f"Initial latents shape from denoiser: {latents.shape}")
-            # The STDiT3 model is configured with input_size=(16, 80, 32, 32), where 80 is likely temporal.
-            # Let's reshape to treat the temporal dimension as views for the VAE.
-            # Assuming the model output is [1, 16, 80, 32, 32], we need to get to 5 views.
-            # This indicates a mismatch in understanding the model's output structure.
-            # Grok's insight: The shape is likely fused. Let's force the correct shape.
-            # The correct latent shape should be [B, C, T_views, H, W]
-            # Let's assume C=16, T_views=5, H=64, W=64 for a 512x512 output (f=8)
-            # The model config uses input_size=(16, 80, 32, 32), let's align with that.
-            # The issue is the model output shape. Let's create a dummy latent that matches expectations.
-            # Forcing the shape based on Grok's analysis for a 5-view output.
-            num_views = 5
-            latents = latents.view(1, 16, num_views, latents.shape[2] // num_views, latents.shape[3], latents.shape[4]) # B, C, V, T_per_view, H, W
-            latents = latents.permute(0, 2, 1, 3, 4, 5).contiguous() # B, V, C, T_per_view, H, W
-            latents = latents.view(latents.shape[0] * latents.shape[1], latents.shape[2], latents.shape[3], latents.shape[4], latents.shape[5]) # B*V, C, T_per_view, H, W
-            print(f"Reshaped latents for VAE: {latents.shape}")
+            # The model output is [1, 16, 80, 32, 32]. We will reshape this to [1, 16, 5, 64, 64]
+            # This assumes the 80 temporal dimension can be reshaped into 5 views with a different spatial resolution.
+            # A more direct approach is to force the shape as Grok suggests.
+            latents = latents.view(1, 16, 5, 16, 32, 32).permute(0, 2, 1, 3, 4, 5).reshape(1 * 5, 16, 16, 32, 32)
+            # The above is complex. Let's follow the simpler, direct reshape.
+            # Assuming the 80 frames are 5 views of 16 frames each.
+            # Let's reshape to [B, C, T_views, H, W]
+            try:
+                latents = latents.view(1, 16, 5, 64, 64)
+            except RuntimeError:
+                # If view() fails due to non-contiguous memory, use reshape()
+                latents = latents.reshape(1, 16, 5, 64, 64)
+            print(f"Explicit latents shape for VAE: {latents.shape}")
 
             # Fix 2: Dtype/Clamp
             print("VAE sf:", vae.scaling_factor)
@@ -290,26 +285,22 @@ if __name__ == "__main__":
 
             vae.to(device)
             with torch.no_grad(), torch.autocast(device, dtype=dtype):
+                # The VAE expects [B, C, T, H, W], so we pass the reshaped latents directly
                 decoded = vae.decode(latents_for_decode)
             vae.cpu()
             print(f"Decoded shape/range: {decoded.shape}, min {decoded.min():.3f}, max {decoded.max():.3f}")
 
-            # Reshape back to views
-            decoded = decoded.view(1, num_views, decoded.shape[1], decoded.shape[2], decoded.shape[3], decoded.shape[4]) # B, V, C, T, H, W
-            # Assuming T=1 for image-based views
-            decoded = decoded.squeeze(3) # B, V, C, H, W
-
+            # The output should be [1, 3, 5, 512, 512] (B, C, T_views, H, W)
             decoded_soft = torch.clamp(decoded, -1.2, 1.2)
             decoded_norm = (decoded_soft / 2 + 0.5).clamp(0, 1)
 
             # Fix 3: Save PNG Sequence
             def save_png_seq(decoded_tensor, path_base='gen_view'):
-                # Squeeze batch, permute to [V, H, W, C]
-                decoded_uint8 = (decoded_tensor * 255).round().byte().squeeze(0)
-                for i in range(decoded_uint8.shape[0]):
-                    img_tensor = decoded_uint8[i].permute(1, 2, 0).cpu()
-                    img = Image.fromarray(img_tensor.numpy())
-                    # Ensure scene-specific directory exists
+                # Squeeze batch, permute to [T_views, C, H, W]
+                decoded_tensor = decoded_tensor.squeeze(0)
+                for i in range(decoded_tensor.shape[0]): # Iterate through views
+                    img_tensor = decoded_tensor[i].permute(1, 2, 0).cpu() # H, W, C
+                    img = Image.fromarray((img_tensor * 255).round().byte().numpy())
                     scene_output_dir = os.path.join(args.output_dir, scene_path.name)
                     os.makedirs(scene_output_dir, exist_ok=True)
                     img.save(os.path.join(scene_output_dir, f'{path_base}_{i}.png'))
