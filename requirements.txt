@@ -20,5 +20,6 @@ timm==0.9.16
 rotary-embedding-torch==0.5.3
 safetensors
 pillow
+einops
 tqdm
 einops
