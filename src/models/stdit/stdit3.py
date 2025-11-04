@@ -194,8 +194,9 @@ class STDiT3(PreTrainedModel):
     """
     Diffusion model with a Transformer backbone - Unified NC-Free Version.
     """
+
     config_class = STDiT3Config
-    _supports_gradient_checkpointing = True  # Added: Enables the feature
+    _supports_gradient_checkpointing = False  # Added: Enables the feature
 
     def __init__(self, config: STDiT3Config):
         super().__init__(config)
@@ -401,3 +402,4 @@ def SdgSTDiT3_XL_2(**kwargs):
     )
     model = STDiT3(config)
     return model
+
