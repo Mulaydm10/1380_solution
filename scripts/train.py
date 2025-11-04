@@ -148,6 +148,7 @@ def main():
     vae = build_module(vae_config_dict, MODELS)
     # Load STDiT3 model
     model_config_dict['in_channels'] = 80
+    model_config_dict['input_size'] = (80, 5, 64, 64) # (latent_channels, num_views, latent_height, latent_width)
     if accelerator.is_main_process:
         print(f"[Model Build] Overriding model config. New config: {model_config_dict}")
     if accelerator.is_main_process:
