@@ -260,15 +260,54 @@ if __name__ == "__main__":
                     latents = scheduler.step(noise_pred, t, latents).prev_sample
                 print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
 
-            # Decode and save
-            with torch.no_grad():
-                vae.to(device, dtype=dtype)
-                latents = latents / vae.scaling_factor
-                images = vae.decode(latents.to(torch.float16))
-                vae.cpu()
+            # --- Start Grok Patch: VAE Decode & Save ---
+            # Fix 1: Reshape Latent Tensor if fused
+            # Assuming the model output `latents` might have a fused shape.
+            # The target is [B, V, C, T_lat, H_lat, W_lat] but VAE expects [B*V, C, T_lat, H_lat, W_lat]
+            # Based on STDiT3, the output shape is [1, 16, 80, 32, 32]. Let's assume this represents 5 views.
+            # The temporal dimension is 80, and there are 5 views. Let's assume T=16 frames per view.
+            # New shape should be (B, V, C, T_frames, H, W). Let's try to decode view by view.
+            
+            print(f"Initial latents shape: {latents.shape}")
+            latents = latents / vae.scaling_factor
+            print(f"Scaled latents min/max: {latents.min():.3f}/{latents.max():.3f}")
 
-            output_gif_path = os.path.join(args.output_dir, f"{scene_path.name}.gif")
-            save_gif(images, output_gif_path)
+            # Reshape for multi-view decoding
+            # The model output is likely (B, C, T, H, W). Let's assume T contains the views.
+            # For this model, let's assume 5 views are packed in the temporal dimension.
+            num_views = 5
+            if latents.shape[2] % num_views == 0:
+                b, c, t, h, w = latents.shape
+                frames_per_view = t // num_views
+                latents_reshaped = latents.view(b, c, num_views, frames_per_view, h, w).permute(0, 2, 1, 3, 4, 5).contiguous()
+                latents_for_decode = latents_reshaped.view(b * num_views, c, frames_per_view, h, w)
+                print(f"Reshaped latents for VAE: {latents_for_decode.shape}")
+            else:
+                latents_for_decode = latents # Fallback
+
+            with torch.no_grad(), torch.autocast('cuda', dtype=dtype):
+                decoded = vae.decode(latents_for_decode)
+            print(f"Decoded shape/range: {decoded.shape}, min {decoded.min():.3f}, max {decoded.max():.3f}")
+
+            # Fix 3: Soft Norm + Clamp
+            decoded_soft = torch.clamp(decoded, -1.5, 1.5)
+            decoded_norm = (decoded_soft / 2 + 0.5).clamp(0, 1)
+            print(f"Soft norm range: min {decoded_norm.min():.3f}, max {decoded_norm.max():.3f}")
+
+            # To uint8 and save PNG sequence
+            decoded_uint8 = (decoded_norm * 255).round().byte().cpu()
+            print(f"Uint8 shape: {decoded_uint8.shape}")
+
+            # Save PNG Seq for each view
+            for i in range(decoded_uint8.shape[0]): # Iterate through views
+                view_frames = decoded_uint8[i] # Shape (C, T, H, W)
+                for j in range(view_frames.shape[1]): # Iterate through frames in the view
+                    frame_tensor = view_frames[:, j, :, :].permute(1, 2, 0) # H, W, C
+                    img = Image.fromarray(frame_tensor.numpy())
+                    os.makedirs(os.path.join(args.output_dir, scene_path.name), exist_ok=True)
+                    img.save(os.path.join(args.output_dir, scene_path.name, f"view_{i}_frame_{j}.png"))
+            print(f"Saved PNG sequence for scene {scene_path.name}")
+            # --- End Grok Patch ---
 
         except Exception as e:
             print(f"!!! Failed to process scene {scene_path.name}: {e}")
