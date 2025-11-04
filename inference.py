@@ -267,7 +267,7 @@ if __name__ == "__main__":
 
             vae.to(device)
             with torch.no_grad(), torch.autocast('cuda', dtype=dtype):
-                decoded = vae.decode(latents).sample  # Direct [1,3,512,512] or AR (e.g., 640x512 if input non-square)
+                decoded = vae.decode(latents)  # Direct [1,3,512,512] or AR (e.g., 640x512 if input non-square)
             vae.cpu()
             print("Decoded shape/range: ", decoded.shape, "min/max", decoded.min().item(), decoded.max().item())
 
