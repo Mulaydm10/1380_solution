@@ -16,6 +16,8 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
+from safetensors.torch import save_file
+import json
 
 from src.models.stdit.control_embedder import ControlEmbedder
 
@@ -299,45 +301,43 @@ def main():
 
         # End of epoch saving
         if accelerator.is_main_process:
-            # Save current epoch
-            accelerator.save_state(os.path.join(training_config.output_dir, f"epoch_{epoch}"))
-            print(f"[Checkpoint] Saved epoch {epoch}")
-
-            # --- Rolling Checkpoint Management ---
+            # Pre-save: Free old to buffer space
             checkpoint_dirs = sorted(
-                [
-                    d
-                    for d in os.listdir(training_config.output_dir)
-                    if d.startswith("epoch_")
-                ],
+                [d for d in os.listdir(training_config.output_dir) if d.startswith("epoch_")],
                 key=lambda x: int(x.split("_")[-1]),
             )
-            max_checkpoints = 2  # Keep the 2 most recent checkpoints
+            max_checkpoints = 2
             if len(checkpoint_dirs) > max_checkpoints:
-                # Backup current before delete (safety)
-                current_dir = os.path.join(training_config.output_dir, f"epoch_{epoch}")
-                backup_dir = current_dir + ".backup"
-                if not os.path.exists(backup_dir):
-                    import shutil
-                    shutil.copytree(current_dir, backup_dir)
-                    print(f"[Checkpoint] Backed up current epoch {epoch} to {backup_dir}")
-
-                # Delete oldest (stale check: skip if empty)
                 dir_to_delete = os.path.join(training_config.output_dir, checkpoint_dirs[0])
-                if os.path.exists(dir_to_delete) and os.listdir(dir_to_delete):  # Non-empty
-                    print(f"[Checkpoint Manager] Deleting oldest non-empty: {dir_to_delete}")
+                if os.path.exists(dir_to_delete) and os.listdir(dir_to_delete):
+                    print(f"[Checkpoint Manager] Pre-save clean: Deleting {dir_to_delete}")
                     shutil.rmtree(dir_to_delete)
-                else:
-                    print(f"[Checkpoint Manager] Skipping empty dir: {dir_to_delete}")
-
+            
             # Disk check
-            import shutil
             disk_free = shutil.disk_usage(training_config.output_dir).free / (1024**3)  # GB
-            if disk_free < 2:
-                print("Disk low – Cleaning all but last 2")
-                # Force clean to last 2
-                for old in checkpoint_dirs[:-2]:
+            if disk_free < 3:
+                print("Disk low – Force clean to last 1")
+                for old in checkpoint_dirs[:-1]:
                     shutil.rmtree(os.path.join(training_config.output_dir, old))
+
+            # Save model only (safetensors – no zip/pos error)
+            model_state = accelerator.unwrap_model(model).state_dict() if accelerator.distributed_type == 'DDP' else model.state_dict()
+            save_file(model_state, os.path.join(training_config.output_dir, f"epoch_{epoch}", "model.safetensors"))
+            print(f"[Checkpoint] Saved model safetensors for epoch {epoch}")
+
+            # Optional: Save config for recreate
+            import json
+            with open(os.path.join(training_config.output_dir, f"epoch_{epoch}", "config.json"), 'w') as f:
+                json.dump(model_config_dict, f)
+
+            # Post-save: Clean if >2 (now safe)
+            checkpoint_dirs = sorted([d for d in os.listdir(training_config.output_dir) if d.startswith("epoch_")], key=lambda x: int(x.split("_")[-1]))
+            if len(checkpoint_dirs) > max_checkpoints:
+                dir_to_delete = os.path.join(training_config.output_dir, checkpoint_dirs[0])
+                if os.path.exists(dir_to_delete) and os.listdir(dir_to_delete):
+                    print(f"[Checkpoint Manager] Post-save clean: Deleting {dir_to_delete}")
+                    shutil.rmtree(dir_to_delete)
+
 
 
 if __name__ == "__main__":
