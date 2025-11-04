@@ -225,6 +225,10 @@ def main():
             total=len(train_dataloader), disable=not accelerator.is_local_main_process
         )
         progress_bar.set_description(f"Epoch {epoch}")
+        
+        # Move cond embedder instance outside loop if possible (once per epoch)
+        control_embedder_instance = ControlEmbedder(MODELS, **model.config.__dict__)
+        control_embedder_instance.to(accelerator.device)
 
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(model):
@@ -242,64 +246,38 @@ def main():
                     latents_list = []
                     for i in range(images_gt.size(1)):
                         view = images_gt[:, i : i + 1, :, :, :]
-                        view_permed = view.permute(0, 2, 1, 3, 4)
+                        view_permed = view.permute(0, 2, 1, 3, 4)  # C,T,H,W – Video VAE order
                         latent_view = vae.encode(view_permed)
                         latents_list.append(latent_view)
-
                     gt_latents = torch.cat(latents_list, dim=1)
                     if accelerator.is_main_process:
-                        print(
-                            f"[VAE Encode] Output gt_latents shape: {gt_latents.shape}"
-                        )
-
+                        print(f"[VAE Encode] Output gt_latents shape: {gt_latents.shape}")
                     vae.to("cpu")
 
-                t = torch.rand(gt_latents.shape[0], device=accelerator.device).view(
-                    -1, 1, 1, 1, 1
-                )
+                t = torch.rand(gt_latents.shape[0], device=accelerator.device).view(-1, 1, 1, 1, 1)
                 noise = torch.randn_like(gt_latents)
                 noisy_latents = (1 - t) * gt_latents + t * noise
                 timesteps = t.squeeze(-1).squeeze(-1).squeeze(-1)
 
-                from src.models.stdit.control_embedder import ControlEmbedder
-
-                print(
-                    f"[train.py] Instantiating ControlEmbedder with registry: {MODELS} and config: {model.config.__dict__}"
-                )
-                control_embedder_instance = ControlEmbedder(
-                    MODELS, **model.config.__dict__
-                )
-                control_embedder_instance.to(accelerator.device)
-
                 bboxes_list = batch["bboxes_3d_data"]
-                cond_emb = control_embedder_instance(
-                    bboxes_list, batch["camera_param"], batch["bev_grid"]
-                )
+                cond_emb = control_embedder_instance(bboxes_list, batch["camera_param"], batch["bev_grid"])
 
-                predicted_noise = model(
-                    noisy_latents, timesteps, encoder_hidden_states=cond_emb
-                )
+                predicted_noise = model(noisy_latents, timesteps, encoder_hidden_states=cond_emb)
+
                 loss = F.mse_loss(predicted_noise.float(), noise.float())
 
                 accelerator.backward(loss)
 
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(
-                    model.parameters(), training_config.max_grad_norm
-                )
-
+                # Sync: Clip full grads, step scaler-checked opt, zero
+                accelerator.clip_grad_norm_(model.parameters(), training_config.max_grad_norm)
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
                 progress_bar.update(1)
                 global_step += 1
-
-                logs = {
-                    "loss": loss.detach().item(),
-                    "lr": lr_scheduler.get_last_lr()[0],
-                    "step": global_step,
-                }
+                logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0], "step": global_step}
                 accelerator.log(logs, step=global_step)
 
         # End of epoch saving
