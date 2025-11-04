@@ -252,7 +252,7 @@ if __name__ == "__main__":
                 )
 
             # Denoising loop
-            latents = torch.randn((1, 16, 80, 32, 32), device=device, dtype=dtype)
+            latents = torch.randn((1, 16, 64, 64), device=device, dtype=dtype) * vae.scaling_factor
             for i, t in enumerate(scheduler.timesteps):
                 with torch.no_grad():
                     t_batch = t.repeat(latents.shape[0]).to(device)
