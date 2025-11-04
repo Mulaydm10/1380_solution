@@ -191,13 +191,11 @@ from src.models.layers.pos_embed import PositionEmbedding3D
 
 
 class STDiT3(PreTrainedModel):
-    _supports_gradient_checkpointing = True
-    _supports_gradient_checkpointing = True
     """
     Diffusion model with a Transformer backbone - Unified NC-Free Version.
     """
-
     config_class = STDiT3Config
+    _supports_gradient_checkpointing = True  # Added: Enables the feature
 
     def __init__(self, config: STDiT3Config):
         super().__init__(config)
@@ -245,7 +243,7 @@ class STDiT3(PreTrainedModel):
 
         # base blocks
         drop_path = [x.item() for x in torch.linspace(0, config.drop_path, self.depth)]
-        self.spatial_blocks = nn.ModuleList(
+        self.blocks = nn.ModuleList(
             [
                 STDiT3Block(
                     hidden_size=self.hidden_size,
@@ -350,10 +348,13 @@ class STDiT3(PreTrainedModel):
         x_b = self.x_embedder(x)  # [B, N=T*S, C] unified
         x = self.pos_embed(x_b)  # [B, N, C]
 
-        # 4. Forward through blocks
+        # 4. Forward through blocks – Checkpoint wrap if enabled
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
-                x = torch.utils.checkpoint.checkpoint(block, x, y, t_mlp, use_reentrant=False)
+                # Wrap with checkpoint; pass args as tuple for multi-arg
+                x = torch.utils.checkpoint.checkpoint(
+                    block, x, y, t_mlp, use_reentrant=False
+                )
             else:
                 x = block(x, y, t_mlp)
 
@@ -400,4 +401,3 @@ def SdgSTDiT3_XL_2(**kwargs):
     )
     model = STDiT3(config)
     return model
-
