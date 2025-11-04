@@ -299,9 +299,9 @@ def main():
 
         # End of epoch saving
         if accelerator.is_main_process:
-            accelerator.save_state(
-                os.path.join(training_config.output_dir, f"epoch_{epoch}")
-            )
+            # Save current epoch
+            accelerator.save_state(os.path.join(training_config.output_dir, f"epoch_{epoch}"))
+            print(f"[Checkpoint] Saved epoch {epoch}")
 
             # --- Rolling Checkpoint Management ---
             checkpoint_dirs = sorted(
@@ -314,16 +314,30 @@ def main():
             )
             max_checkpoints = 2  # Keep the 2 most recent checkpoints
             if len(checkpoint_dirs) > max_checkpoints:
-                dir_to_delete = os.path.join(
-                    training_config.output_dir, checkpoint_dirs[0]
-                )
-                print(
-                    f"[Checkpoint Manager] Deleting oldest checkpoint to save space: {dir_to_delete}"
-                )
-                # Use shutil.rmtree for safely deleting directories
-                import shutil
+                # Backup current before delete (safety)
+                current_dir = os.path.join(training_config.output_dir, f"epoch_{epoch}")
+                backup_dir = current_dir + ".backup"
+                if not os.path.exists(backup_dir):
+                    import shutil
+                    shutil.copytree(current_dir, backup_dir)
+                    print(f"[Checkpoint] Backed up current epoch {epoch} to {backup_dir}")
 
-                shutil.rmtree(dir_to_delete)
+                # Delete oldest (stale check: skip if empty)
+                dir_to_delete = os.path.join(training_config.output_dir, checkpoint_dirs[0])
+                if os.path.exists(dir_to_delete) and os.listdir(dir_to_delete):  # Non-empty
+                    print(f"[Checkpoint Manager] Deleting oldest non-empty: {dir_to_delete}")
+                    shutil.rmtree(dir_to_delete)
+                else:
+                    print(f"[Checkpoint Manager] Skipping empty dir: {dir_to_delete}")
+
+            # Disk check
+            import shutil
+            disk_free = shutil.disk_usage(training_config.output_dir).free / (1024**3)  # GB
+            if disk_free < 2:
+                print("Disk low – Cleaning all but last 2")
+                # Force clean to last 2
+                for old in checkpoint_dirs[:-2]:
+                    shutil.rmtree(os.path.join(training_config.output_dir, old))
 
 
 if __name__ == "__main__":
