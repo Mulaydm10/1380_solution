@@ -148,7 +148,9 @@ def main():
         p.name
         for p in pathlib.Path(training_config.data_path).iterdir()
         if (p / "ride_id.json").exists()
-    ][:50]  # Use only 50 scenes for the proof run
+    ][
+        :50
+    ]  # Use only 50 scenes for the proof run
     train_dataset = SensorGenDataset(scenes, pathlib.Path(training_config.data_path))
     train_dataloader = DataLoader(
         train_dataset,
@@ -280,15 +282,20 @@ def main():
                 loss = F.mse_loss(predicted_noise.float(), noise.float())
 
                 accelerator.backward(loss)
-                            if accelerator.sync_gradients:
-                                accelerator.clip_grad_norm_(model.parameters(), training_config.max_grad_norm)
-                
-                                optimizer.step()
-                                lr_scheduler.step()
-                                optimizer.zero_grad()
-                
-                                progress_bar.update(1)
-                                global_step += 1                logs = {
+
+            if accelerator.sync_gradients:
+                accelerator.clip_grad_norm_(
+                    model.parameters(), training_config.max_grad_norm
+                )
+
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
+
+                progress_bar.update(1)
+                global_step += 1
+
+                logs = {
                     "loss": loss.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0],
                     "step": global_step,
