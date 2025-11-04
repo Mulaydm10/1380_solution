@@ -260,20 +260,16 @@ if __name__ == "__main__":
                     latents = scheduler.step(noise_pred, t, latents).prev_sample
                 print(f"Step {i+1}/{args.steps} – Timestep: {t.item():.2f}")
 
-            # --- Single-View Proof: Explicit T Squeeze + Permute on 3D ---
-            print("Latents shape pre-decode: ", latents.shape, "min/max", latents.min(), latents.max())
+            # --- Single-View Proof: Direct Decode, No .sample ---
+            print("Latents shape pre-decode: ", latents.shape, "min/max", latents.min().item(), latents.max().item())
             latents = latents / vae.scaling_factor  # Pre-decode /sf
             print("VAE sf:", vae.scaling_factor)  # ~0.13
 
             vae.to(device)
             with torch.no_grad(), torch.autocast('cuda', dtype=dtype):
-                decoded = vae.decode(latents).sample  # 5D [1,3,1,512,512]
+                decoded = vae.decode(latents)  # Direct tensor [1,3,512,512] – No .sample!
             vae.cpu()
             print("Decoded shape/range: ", decoded.shape, "min/max", decoded.min().item(), decoded.max().item())
-
-            # Squeeze T=1 (dim=2) first: [1,3,512,512] 4D
-            decoded = decoded.squeeze(2)
-            print("Post-T squeeze shape: ", decoded.shape)
 
             # Soft norm + clamp
             decoded_soft = torch.clamp(decoded, -1.2, 1.2)
