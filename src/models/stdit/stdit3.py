@@ -191,6 +191,7 @@ from src.models.layers.pos_embed import PositionEmbedding3D
 
 
 class STDiT3(PreTrainedModel):
+    _supports_gradient_checkpointing = True
     """
     Diffusion model with a Transformer backbone - Unified NC-Free Version.
     """
@@ -348,9 +349,12 @@ class STDiT3(PreTrainedModel):
         x_b = self.x_embedder(x)  # [B, N=T*S, C] unified
         x = self.pos_embed(x_b)  # [B, N, C]
 
-        # === blocks ===
-        for block_i in range(self.depth):
-            x = self.spatial_blocks[block_i](x, y, t_mlp, T=T, S=S)  # No NC
+        # 4. Forward through blocks
+        for block in self.blocks:
+            if self.gradient_checkpointing and self.training:
+                x = torch.utils.checkpoint.checkpoint(block, x, context, t_emb, use_reentrant=False)
+            else:
+                x = block(x, context, t_emb)
 
         # === final layer ===
         t_emb_2d = t_emb.squeeze(1)  # Shape [1, 1, 1152] -> [1, 1152]
